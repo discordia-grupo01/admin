@@ -1,4 +1,4 @@
-module github.com/tu-org/discordia-SERVICIO
+module github.com/discordia-grupo01/admin
 
 go 1.22
 
