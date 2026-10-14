@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   test:
@@ -12,7 +12,7 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: discordia_servicio
+          POSTGRES_DB: discordia_admin_test
           POSTGRES_USER: discordia
           POSTGRES_PASSWORD: discordia
         ports: ["5432:5432"]
@@ -21,6 +21,22 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
+      rabbitmq:
+        image: rabbitmq:3.13-management-alpine
+        ports: ["5672:5672", "15672:15672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_HOST: localhost
+      DATABASE_PORT: 5432
+      DATABASE_USER: discordia
+      DATABASE_PASSWORD: discordia
+      DATABASE_NAME: discordia_admin_test
+      DATABASE_SSLMODE: disable
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -37,4 +53,17 @@ jobs:
 
       - run: go build ./...
       - run: go vet ./...
-      - run: go test ./... -cover
+      - name: Migrar la base de test
+        run: make migrate
+      - name: Tests (con cobertura)
+        run: go test ./... -count=1 -coverpkg=./internal/... -coverprofile=coverage.out
+      - name: Verificar cobertura minima (70%)
+        run: |
+          # testutil son helpers de test, no código del servicio: se excluyen del cálculo.
+          grep -v '/internal/testutil/' coverage.out > coverage.filtered.out
+          COVERAGE=$(go tool cover -func=coverage.filtered.out | tail -1 | awk '{print $3}' | tr -d '%')
+          echo "Cobertura total: ${COVERAGE}%"
+          if awk "BEGIN {exit !($COVERAGE < 70)}"; then
+            echo "::error::Cobertura ${COVERAGE}% por debajo del minimo requerido (70%)"
+            exit 1
+          fi
