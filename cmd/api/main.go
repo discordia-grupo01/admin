@@ -65,6 +65,8 @@ func run() error {
 		poller.Start(ctx)
 	}()
 
+	users := handler.NewUserHandler(service.NewUserService(repository.NewUserRepository(db)))
+
 	router := handler.NewRouter(handler.Deps{
 		JWTSecret: []byte(cfg.JWTSecret),
 		Staff:     staff,
@@ -72,7 +74,7 @@ func run() error {
 			handler.Check{Name: "postgres", Fn: db.PingContext},
 			handler.Check{Name: "rabbitmq", Fn: func(context.Context) error { return publisher.Ping() }},
 		),
-	})
+	}, users.Register)
 
 	server := &http.Server{
 		Addr:              cfg.Addr(),

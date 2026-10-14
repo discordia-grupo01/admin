@@ -76,8 +76,8 @@ paths:
       parameters:
         - name: search
           in: query
-          schema: { type: string }
-          description: Texto a buscar en el email o el nombre.
+          schema: { type: string, maxLength: 100 }
+          description: Texto a buscar en el email o el nombre. Los caracteres `%`, `_` y `\` se toman como texto literal.
         - name: status
           in: query
           schema: { $ref: "#/components/schemas/UserStatus" }
