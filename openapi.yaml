@@ -1,16 +1,269 @@
 openapi: 3.0.3
 info:
-  title: Discordia - SERVICIO
+  title: Discordia - Admin
   version: "1.0.0"
+  description: |
+    API del backoffice de Discordia (épica Administración). Todos los endpoints
+    `/v1/admin/*` requieren `Authorization: Bearer <JWT>` de un usuario que sea
+    staff de la plataforma.
+
+    **Estado**: `/livez` y `/readyz` están implementados. Los endpoints de
+    `/v1/admin` son el contrato acordado y se implementan en las ramas de cada
+    historia (#29 suspender, #30 reactivar, #31 listado de usuarios, #32
+    listado de servidores).
+
+    **Consistencia eventual**: suspender o reactivar cambia el estado en admin
+    al instante y publica un evento; los demás servicios lo aplican a los pocos
+    instantes.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Health
+  - name: Users
+  - name: Servers
 paths:
   /livez:
     get:
+      tags: [Health]
       summary: Liveness check
+      description: Confirma que el proceso está vivo. No consulta dependencias.
+      security: []
       responses:
-        "200": { description: OK }
+        "200":
+          description: El proceso está vivo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: alive }
   /readyz:
     get:
+      tags: [Health]
       summary: Readiness check
+      description: Confirma que las dependencias críticas (Postgres, RabbitMQ) responden.
+      security: []
       responses:
-        "200": { description: OK }
-        "503": { description: Dependencias no disponibles }
+        "200":
+          description: Listo para recibir tráfico
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ready }
+        "503":
+          description: Alguna dependencia no responde
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: unavailable }
+                  failed:
+                    type: array
+                    items: { type: string }
+                    example: [postgres]
+  /v1/admin/users:
+    get:
+      tags: [Users]
+      summary: Listar usuarios con filtros (HU #31)
+      description: |
+        Lista paginada, ordenada por fecha de registro descendente. `search`
+        busca por email o nombre (parcial, sin distinguir mayúsculas).
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+          description: Texto a buscar en el email o el nombre.
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/UserStatus" }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Usuarios que cumplen los filtros (puede ser una lista vacía)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserList" }
+        "400": { $ref: "#/components/responses/InvalidQuery" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/users/{id}/suspension:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Users]
+      summary: Suspender a un usuario (HU #29)
+      description: |
+        Impide que el usuario inicie sesión y use la plataforma. Publica
+        `admin.user_suspended`. No se puede suspender a un miembro del staff
+        (incluido uno mismo).
+      responses:
+        "200":
+          description: Usuario suspendido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: No es staff (`FORBIDDEN`) o el objetivo es staff (`CANNOT_SUSPEND_STAFF`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: El usuario no existe (`USER_NOT_FOUND`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: El usuario ya estaba suspendido (`USER_ALREADY_SUSPENDED`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    delete:
+      tags: [Users]
+      summary: Reactivar a un usuario suspendido (HU #30)
+      description: Levanta la suspensión. Publica `admin.user_reactivated`.
+      responses:
+        "200":
+          description: Usuario reactivado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: El usuario no existe (`USER_NOT_FOUND`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: El usuario no estaba suspendido (`USER_NOT_SUSPENDED`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v1/admin/servers:
+    get:
+      tags: [Servers]
+      summary: Listar los servidores de la plataforma (HU #32)
+      description: Lista paginada, ordenada por fecha de creación descendente.
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+          description: Texto a buscar en el nombre del servidor.
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Servidores que cumplen el filtro (puede ser una lista vacía)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerList" }
+        "400": { $ref: "#/components/responses/InvalidQuery" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 0, maximum: 100, default: 20 }
+      description: Tamaño de página (máximo 100; un valor mayor se acota a 100).
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+  responses:
+    InvalidQuery:
+      description: Parámetros de consulta inválidos (`INVALID_QUERY`)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Unauthorized:
+      description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Forbidden:
+      description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code: { type: string, example: FORBIDDEN }
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+    UserStatus:
+      type: string
+      enum: [active, suspended]
+    User:
+      type: object
+      required: [id, name, email, status, created_at, suspended_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        status: { $ref: "#/components/schemas/UserStatus" }
+        created_at:
+          type: string
+          format: date-time
+          description: Fecha de registro (UTC).
+        suspended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Cuándo se suspendió; null si está activo.
+    UserList:
+      type: object
+      required: [users, total, limit, offset]
+      properties:
+        users:
+          type: array
+          items: { $ref: "#/components/schemas/User" }
+        total: { type: integer, description: Cantidad de usuarios que cumplen los filtros. }
+        limit: { type: integer }
+        offset: { type: integer }
+    Server:
+      type: object
+      required: [id, name, owner_id, owner_name, member_count, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        owner_id: { type: string, format: uuid }
+        owner_name:
+          type: string
+          nullable: true
+          description: null si el perfil del dueño todavía no se replicó.
+        member_count: { type: integer }
+        created_at: { type: string, format: date-time }
+    ServerList:
+      type: object
+      required: [servers, total, limit, offset]
+      properties:
+        servers:
+          type: array
+          items: { $ref: "#/components/schemas/Server" }
+        total: { type: integer, description: Cantidad de servidores que cumplen el filtro. }
+        limit: { type: integer }
+        offset: { type: integer }

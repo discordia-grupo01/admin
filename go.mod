@@ -1,8 +1,15 @@
-module github.com/tu-org/discordia-SERVICIO
+module github.com/discordia-grupo01/admin
 
 go 1.22
 
-require github.com/gin-gonic/gin v1.10.0
+require (
+	github.com/discordia-grupo01/events-contract v0.8.1
+	github.com/gin-gonic/gin v1.10.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/google/uuid v1.6.0
+	github.com/lib/pq v1.12.3
+	github.com/rabbitmq/amqp091-go v1.10.0
+)
 
 require (
 	github.com/bytedance/sonic v1.11.6 // indirect
