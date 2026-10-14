@@ -2,7 +2,7 @@
 
 Servicio de **Administración** de Discordia: la API del backoffice para el staff de la plataforma. Cubre las historias #29 (suspender usuario), #30 (reactivar usuario), #31 (listado de usuarios con filtros) y #32 (listado de servidores).
 
-> **Estado**: la base del servicio está lista (configuración, autenticación de staff, outbox, RabbitMQ, `/livez` y `/readyz`). Los endpoints de `/v1/admin` están definidos en [`openapi.yaml`](openapi.yaml) y se implementan en las ramas de cada historia.
+> **Estado**: implementado `GET /v1/admin/users` (#31), la base del servicio (configuración, autenticación de staff, outbox, RabbitMQ, `/livez` y `/readyz`) y el alta de staff. Faltan suspender (#29), reactivar (#30) y el listado de servidores (#32); sus endpoints ya están definidos en [`openapi.yaml`](openapi.yaml).
 
 ## Stack
 - Lenguaje: Go
@@ -27,7 +27,17 @@ make run
 
 Postgres queda en `localhost:5433` (no 5432, para no chocar con otros servicios) y la consola de RabbitMQ en http://localhost:15672 (guest / guest).
 
-Para entrar como staff, poner en `STAFF_USER_IDS` el UUID de un usuario registrado en identify.
+## Dar de alta al staff
+El rol de staff no se puede auto-asignar desde la API: se otorga por fuera, de dos maneras.
+
+- **Por UUID**: poner el UUID del usuario (de identify) en `STAFF_USER_IDS`. Se siembra en cada arranque (es idempotente).
+- **Por email**: si el usuario ya está en la réplica de admin (se registró en identify y su alta llegó por `users.account_registered`):
+  ```bash
+  make seed-staff EMAIL=manu@example.com
+  ```
+  Usa la misma conexión `DATABASE_*` que el servicio y no necesita `JWT_SECRET` ni RabbitMQ. Es idempotente.
+
+Para quitarle el rol a alguien: borrar su fila de `staff_members` y sacarlo de `STAFF_USER_IDS` (si no, se vuelve a sembrar al arrancar).
 
 ## Variables de entorno
 | Variable | Default | Descripción |
@@ -53,7 +63,9 @@ Para entrar como staff, poner en `STAFF_USER_IDS` el UUID de un usuario registra
 ## Estructura de carpetas
 ```
 discordia-admin/
-├── cmd/api/main.go          arranque: config, base, outbox, router y apagado ordenado
+├── cmd/
+│   ├── api/main.go          arranque: config, base, consumers, outbox, router y apagado ordenado
+│   └── seedstaff/main.go    herramienta: da de alta staff por email
 ├── internal/
 │   ├── config/              carga y validación del entorno
 │   ├── apierr/              formato de error {error:{code,message,details}}
@@ -78,6 +90,7 @@ discordia-admin/
 - `make test-integration` - además corre los tests de integración contra el Postgres y el RabbitMQ de docker-compose (usa una base aparte, `discordia_admin_test`, porque esos tests vacían tablas).
 - `make build` - compila el binario en `bin/api`.
 - `make migrate` - aplica las migraciones pendientes (lee la conexión de `.env`).
+- `make seed-staff EMAIL=<email>` - da de alta como staff al usuario con ese email.
 
 ## Tests
 Cobertura mínima: 70 % (requisito del proyecto). El CI la verifica en cada PR, con Postgres y RabbitMQ de servicio.
@@ -86,7 +99,13 @@ Cobertura mínima: 70 % (requisito del proyecto). El CI la verifica en cada PR, 
 Ver [`openapi.yaml`](openapi.yaml).
 
 ## Eventos
-Se agregan junto con cada historia: `admin.user_suspended` y `admin.user_reactivated` (publica, firmados con HMAC), y los de `users.*` y `servers.*` que consume para armar sus listados.
+Esquemas en [`discordia-docs`](https://github.com/discordia-grupo01/docs) (`asyncapi/`) y tipos en [`events-contract`](https://github.com/discordia-grupo01/events-contract).
+
+**Consume** (cola `admin.users`, ack manual): `users.account_registered` y `users.profile_updated`. Alimentan la réplica de usuarios del listado. Son idempotentes y toleran desorden: el perfil se aplica solo si su `version` es mayor a la guardada, y un usuario no aparece hasta que llega su alta. Los mensajes inválidos (JSON roto, id que no es UUID, etc.) se descartan y quedan en `consumed_events`; las fallas de base se reencolan.
+
+**Publica**: todavía nada. Con las próximas historias: `admin.user_suspended` y `admin.user_reactivated` (firmados con HMAC).
+
+Hasta que identify publique `users.account_registered`, la tabla de usuarios solo se llena en los tests.
 
 ## Health checks
 - `GET /livez` - el proceso está vivo. No consulta dependencias.

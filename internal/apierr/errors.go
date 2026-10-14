@@ -4,6 +4,7 @@ package apierr
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,6 +33,26 @@ func Abort(c *gin.Context, status int, code, message string, details map[string]
 		details = map[string]any{}
 	}
 	c.AbortWithStatusJSON(status, ErrorResponse{Error: Body{Code: code, Message: message, Details: details}})
+}
+
+// InvalidQuery responde 400 INVALID_QUERY indicando qué parámetro falló.
+func InvalidQuery(c *gin.Context, param, message string) {
+	Abort(c, http.StatusBadRequest, CodeInvalidQuery, message, map[string]any{"param": param})
+}
+
+// ParseNonNegativeIntQuery lee un parámetro entero >= 0 de la query string.
+// Si falta devuelve def; si es inválido responde 400 y devuelve ok=false.
+func ParseNonNegativeIntQuery(c *gin.Context, key string, def int) (value int, ok bool) {
+	raw := c.Query(key)
+	if raw == "" {
+		return def, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		InvalidQuery(c, key, "El parámetro "+key+" debe ser un entero mayor o igual a 0")
+		return 0, false
+	}
+	return n, true
 }
 
 func Unauthorized(c *gin.Context) {

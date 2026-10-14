@@ -10,6 +10,7 @@ import (
 	"github.com/discordia-grupo01/admin/internal/events"
 	"github.com/discordia-grupo01/admin/internal/testutil"
 	"github.com/google/uuid"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type captureHandler struct{ got chan string }
@@ -37,6 +38,20 @@ func TestPublisherToConsumerRoundTrip(t *testing.T) {
 	suffix := uuid.NewString()
 	queue := "admin.test." + suffix
 	key := "admin.test_event_" + suffix
+
+	// La cola es durable (como la del servicio real): se borra al terminar para
+	// no dejar una cola huérfana por cada corrida de tests.
+	t.Cleanup(func() {
+		conn, err := amqp.Dial(url)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if ch, err := conn.Channel(); err == nil {
+			_, _ = ch.QueueDelete(queue, false, false, false)
+			_ = ch.Close()
+		}
+	})
 
 	h := captureHandler{got: make(chan string, 1)}
 	ctx, cancel := context.WithCancel(context.Background())

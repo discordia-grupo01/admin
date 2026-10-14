@@ -7,10 +7,10 @@ info:
     `/v1/admin/*` requieren `Authorization: Bearer <JWT>` de un usuario que sea
     staff de la plataforma.
 
-    **Estado**: `/livez` y `/readyz` están implementados. Los endpoints de
-    `/v1/admin` son el contrato acordado y se implementan en las ramas de cada
-    historia (#29 suspender, #30 reactivar, #31 listado de usuarios, #32
-    listado de servidores).
+    **Estado**: implementados `/livez`, `/readyz` y `GET /v1/admin/users`
+    (#31). Los demás endpoints de `/v1/admin` son el contrato acordado y se
+    implementan en las ramas de cada historia (#29 suspender, #30 reactivar,
+    #32 listado de servidores).
 
     **Consistencia eventual**: suspender o reactivar cambia el estado en admin
     al instante y publica un evento; los demás servicios lo aplican a los pocos
@@ -76,8 +76,8 @@ paths:
       parameters:
         - name: search
           in: query
-          schema: { type: string }
-          description: Texto a buscar en el email o el nombre.
+          schema: { type: string, maxLength: 100 }
+          description: Texto a buscar en el email o el nombre. Los caracteres `%`, `_` y `\` se toman como texto literal.
         - name: status
           in: query
           schema: { $ref: "#/components/schemas/UserStatus" }
