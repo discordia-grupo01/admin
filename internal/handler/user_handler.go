@@ -17,6 +17,17 @@ import (
 // maxSearchLength acota el texto de búsqueda para no armar patrones enormes.
 const maxSearchLength = 100
 
+// searchQuery lee el parámetro search sin espacios en los bordes. Si supera
+// maxSearchLength responde 400 y devuelve false.
+func searchQuery(c *gin.Context) (string, bool) {
+	search := strings.TrimSpace(c.Query("search"))
+	if utf8.RuneCountInString(search) > maxSearchLength {
+		apierr.InvalidQuery(c, "search", "El parámetro search no puede superar los 100 caracteres")
+		return "", false
+	}
+	return search, true
+}
+
 // UserLister es lo que el handler necesita del servicio de usuarios.
 type UserLister interface {
 	List(ctx context.Context, p service.ListUsersParams) (*model.UserList, error)
@@ -45,9 +56,8 @@ func (h *UserHandler) List(c *gin.Context) {
 	if !ok {
 		return
 	}
-	search := strings.TrimSpace(c.Query("search"))
-	if utf8.RuneCountInString(search) > maxSearchLength {
-		apierr.InvalidQuery(c, "search", "El parámetro search no puede superar los 100 caracteres")
+	search, ok := searchQuery(c)
+	if !ok {
 		return
 	}
 

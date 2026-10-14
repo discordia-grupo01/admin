@@ -90,13 +90,15 @@ func (h *UserEventsHandler) profileUpdated(ctx context.Context, body []byte) err
 	return h.sync.ApplyProfile(ctx, repository.Profile{UserID: id, Name: e.Name, Version: e.Version})
 }
 
-// parseUserID valida que el id sea un UUID (la columna lo es: uno inválido haría
+func parseUserID(raw string) (string, error) { return parseUUID("user_id", raw) }
+
+// parseUUID valida que el id sea un UUID (la columna lo es: uno inválido haría
 // fallar el INSERT para siempre y el mensaje se reintentaría sin fin) y lo
 // devuelve en su forma canónica.
-func parseUserID(raw string) (string, error) {
+func parseUUID(field, raw string) (string, error) {
 	id, err := uuid.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("user_id %q no es un UUID: %w", raw, err)
+		return "", fmt.Errorf("%s %q no es un UUID: %w", field, raw, err)
 	}
 	return id.String(), nil
 }

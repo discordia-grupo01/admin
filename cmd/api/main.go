@@ -78,6 +78,16 @@ func run() error {
 		userConsumer.Start(ctx)
 	}()
 
+	// Y otro, la de servidores con los de servers.
+	serverService := service.NewServerService(repository.NewServerRepository(db))
+	serverConsumer := events.NewConsumer(cfg.RabbitMQURL, events.QueueServers, events.ServerBindings,
+		events.NewServerEventsHandler(serverService), audit.NewPostgresRecorder(db))
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		serverConsumer.Start(ctx)
+	}()
+
 	router := handler.NewRouter(handler.Deps{
 		JWTSecret: []byte(cfg.JWTSecret),
 		Staff:     staff,
@@ -85,7 +95,7 @@ func run() error {
 			handler.Check{Name: "postgres", Fn: db.PingContext},
 			handler.Check{Name: "rabbitmq", Fn: func(context.Context) error { return publisher.Ping() }},
 		),
-	}, users.Register)
+	}, users.Register, handler.NewServerHandler(serverService).Register)
 
 	server := &http.Server{
 		Addr:              cfg.Addr(),
