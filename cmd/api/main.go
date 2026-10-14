@@ -95,7 +95,7 @@ func run() error {
 			handler.Check{Name: "postgres", Fn: db.PingContext},
 			handler.Check{Name: "rabbitmq", Fn: func(context.Context) error { return publisher.Ping() }},
 		),
-	}, users.Register)
+	}, users.Register, handler.NewServerHandler(serverService).Register)
 
 	server := &http.Server{
 		Addr:              cfg.Addr(),

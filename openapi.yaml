@@ -7,10 +7,10 @@ info:
     `/v1/admin/*` requieren `Authorization: Bearer <JWT>` de un usuario que sea
     staff de la plataforma.
 
-    **Estado**: implementados `/livez`, `/readyz` y `GET /v1/admin/users`
-    (#31). Los demás endpoints de `/v1/admin` son el contrato acordado y se
-    implementan en las ramas de cada historia (#29 suspender, #30 reactivar,
-    #32 listado de servidores).
+    **Estado**: implementados `/livez`, `/readyz`, `GET /v1/admin/users` (#31)
+    y `GET /v1/admin/servers` (#32). Los demás endpoints de `/v1/admin` son el
+    contrato acordado y se implementan en las ramas de cada historia (#29
+    suspender, #30 reactivar).
 
     **Consistencia eventual**: suspender o reactivar cambia el estado en admin
     al instante y publica un evento; los demás servicios lo aplican a los pocos
@@ -153,12 +153,14 @@ paths:
     get:
       tags: [Servers]
       summary: Listar los servidores de la plataforma (HU #32)
-      description: Lista paginada, ordenada por fecha de creación descendente.
+      description: |
+        Lista paginada, ordenada por fecha de creación descendente. Un servidor
+        aparece cuando llega su alta a la réplica y desaparece cuando se elimina.
       parameters:
         - name: search
           in: query
-          schema: { type: string }
-          description: Texto a buscar en el nombre del servidor.
+          schema: { type: string, maxLength: 100 }
+          description: Texto a buscar en el nombre del servidor (parcial, sin distinguir mayúsculas). Los caracteres `%`, `_` y `\` se toman como texto literal.
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
       responses:

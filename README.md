@@ -2,7 +2,7 @@
 
 Servicio de **Administración** de Discordia: la API del backoffice para el staff de la plataforma. Cubre las historias #29 (suspender usuario), #30 (reactivar usuario), #31 (listado de usuarios con filtros) y #32 (listado de servidores).
 
-> **Estado**: implementado `GET /v1/admin/users` (#31), la base del servicio (configuración, autenticación de staff, outbox, RabbitMQ, `/livez` y `/readyz`) y el alta de staff. Faltan suspender (#29), reactivar (#30) y el listado de servidores (#32); sus endpoints ya están definidos en [`openapi.yaml`](openapi.yaml).
+> **Estado**: implementados `GET /v1/admin/users` (#31) y `GET /v1/admin/servers` (#32), la base del servicio (configuración, autenticación de staff, outbox, RabbitMQ, `/livez` y `/readyz`) y el alta de staff. Faltan suspender (#29) y reactivar (#30); sus endpoints ya están definidos en [`openapi.yaml`](openapi.yaml).
 
 ## Stack
 - Lenguaje: Go
@@ -70,7 +70,7 @@ discordia-admin/
 │   ├── config/              carga y validación del entorno
 │   ├── apierr/              formato de error {error:{code,message,details}}
 │   ├── middleware/          autenticación (JWT) y autorización (staff)
-│   ├── handler/             router y handlers HTTP (health)
+│   ├── handler/             router y handlers HTTP (health, usuarios, servidores)
 │   ├── service/             lógica de negocio
 │   ├── repository/          acceso a PostgreSQL
 │   ├── audit/               registro de eventos consumidos
@@ -105,7 +105,9 @@ Esquemas en [`discordia-docs`](https://github.com/discordia-grupo01/docs) (`asyn
 
 **Publica**: todavía nada. Con las próximas historias: `admin.user_suspended` y `admin.user_reactivated` (firmados con HMAC).
 
-Hasta que identify publique `users.account_registered`, la tabla de usuarios solo se llena en los tests.
+**Consume** (cola `admin.servers`, ack manual): `servers.server_updated`, `servers.server_deleted`, `servers.member_joined` y `servers.member_left`. Alimentan la réplica de servidores del listado. Ninguno trae versión, así que se ordenan por `occurred_at`: gana la foto de servidor más nueva y, por cada par servidor-usuario, el último evento de membresía. `server_deleted` deja el servidor marcado como borrado (un `server_updated` tardío no lo resucita) y descarta sus membresías. Un servidor no aparece hasta que llega su `server_updated`. Los mensajes inválidos se descartan y quedan en `consumed_events`; las fallas de base se reencolan.
+
+Hasta que identify publique `users.account_registered` y servers publique `servers.server_updated`, las tablas de usuarios y servidores solo se llenan en los tests.
 
 ## Health checks
 - `GET /livez` - el proceso está vivo. No consulta dependencias.
