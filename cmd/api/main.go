@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/discordia-grupo01/admin/internal/audit"
 	"github.com/discordia-grupo01/admin/internal/config"
 	"github.com/discordia-grupo01/admin/internal/events"
 	"github.com/discordia-grupo01/admin/internal/handler"
@@ -65,7 +66,17 @@ func run() error {
 		poller.Start(ctx)
 	}()
 
-	users := handler.NewUserHandler(service.NewUserService(repository.NewUserRepository(db)))
+	userService := service.NewUserService(repository.NewUserRepository(db))
+	users := handler.NewUserHandler(userService)
+
+	// El consumer alimenta la réplica de usuarios con los eventos de identify.
+	userConsumer := events.NewConsumer(cfg.RabbitMQURL, events.QueueUsers, events.UserBindings,
+		events.NewUserEventsHandler(userService), audit.NewPostgresRecorder(db))
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		userConsumer.Start(ctx)
+	}()
 
 	router := handler.NewRouter(handler.Deps{
 		JWTSecret: []byte(cfg.JWTSecret),

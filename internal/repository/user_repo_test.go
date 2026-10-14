@@ -215,6 +215,109 @@ func TestUserListPagination(t *testing.T) {
 	}
 }
 
+func listAll(t *testing.T, repo repository.UserRepository) []model.User {
+	t.Helper()
+	users, _, err := repo.List(context.Background(), repository.UserFilter{}, 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return users
+}
+
+func TestUpsertRegistrationAddsTheUserToTheListing(t *testing.T) {
+	repo, _ := newUserRepo(t)
+	ctx := context.Background()
+	reg := repository.Registration{UserID: uid(1), Email: "manu@example.com", Name: "Manu", RegisteredAt: base}
+
+	if err := repo.UpsertRegistration(ctx, reg); err != nil {
+		t.Fatal(err)
+	}
+	// Repetirlo (at-least-once) deja exactamente lo mismo.
+	if err := repo.UpsertRegistration(ctx, reg); err != nil {
+		t.Fatal(err)
+	}
+
+	users := listAll(t, repo)
+	if len(users) != 1 || users[0].ID != uid(1) || users[0].Email != "manu@example.com" || users[0].Name != "Manu" ||
+		users[0].Status != model.UserStatusActive || !users[0].CreatedAt.Equal(base) {
+		t.Fatalf("listado: %+v", users)
+	}
+}
+
+func TestUpsertProfileKeepsOnlyNewerVersions(t *testing.T) {
+	repo, _ := newUserRepo(t)
+	ctx := context.Background()
+	if err := repo.UpsertRegistration(ctx, repository.Registration{UserID: uid(1), Email: "a@example.com", Name: "Registro", RegisteredAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	name := func() string { return listAll(t, repo)[0].Name }
+
+	steps := []struct {
+		profile repository.Profile
+		want    string
+	}{
+		{repository.Profile{UserID: uid(1), Name: "v1", Version: 1}, "v1"},          // pisa al nombre del registro
+		{repository.Profile{UserID: uid(1), Name: "v3", Version: 3}, "v3"},          // más nueva
+		{repository.Profile{UserID: uid(1), Name: "v2 tardío", Version: 2}, "v3"},   // fuera de orden: se ignora
+		{repository.Profile{UserID: uid(1), Name: "v3 repetido", Version: 3}, "v3"}, // repetido: se ignora
+	}
+	for _, s := range steps {
+		if err := repo.UpsertProfile(ctx, s.profile); err != nil {
+			t.Fatal(err)
+		}
+		if got := name(); got != s.want {
+			t.Fatalf("tras la versión %d el nombre es %q, quería %q", s.profile.Version, got, s.want)
+		}
+	}
+}
+
+// El perfil puede llegar antes que el alta: el usuario no aparece hasta que
+// llega el registro, y entonces conserva el nombre del perfil (más nuevo).
+func TestProfileBeforeRegistration(t *testing.T) {
+	repo, _ := newUserRepo(t)
+	ctx := context.Background()
+
+	if err := repo.UpsertProfile(ctx, repository.Profile{UserID: uid(1), Name: "Del perfil", Version: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if users := listAll(t, repo); len(users) != 0 {
+		t.Fatalf("sin registro no debe aparecer: %+v", users)
+	}
+
+	if err := repo.UpsertRegistration(ctx, repository.Registration{UserID: uid(1), Email: "a@example.com", Name: "Del registro", RegisteredAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	users := listAll(t, repo)
+	if len(users) != 1 || users[0].Name != "Del perfil" || users[0].Email != "a@example.com" {
+		t.Fatalf("debe aparecer con el nombre del perfil y el email del registro: %+v", users)
+	}
+}
+
+// Reaplicar el alta (por ejemplo, un backfill) no puede levantar una suspensión
+// ni borrar el estado: el estado de suspensión es de admin.
+func TestRegistrationDoesNotTouchSuspension(t *testing.T) {
+	repo, db := newUserRepo(t)
+	seed(t, db, []seedUser{{1, "Ana", "ana@example.com", 0, true}})
+
+	if err := repo.UpsertRegistration(context.Background(), repository.Registration{UserID: uid(1), Email: "ana@example.com", Name: "Ana", RegisteredAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	users := listAll(t, repo)
+	if len(users) != 1 || users[0].Status != model.UserStatusSuspended || users[0].SuspendedAt == nil {
+		t.Fatalf("la suspensión debe seguir intacta: %+v", users)
+	}
+}
+
+func TestUpsertRejectsInvalidUserID(t *testing.T) {
+	repo, _ := newUserRepo(t)
+	if err := repo.UpsertRegistration(context.Background(), repository.Registration{UserID: "no-es-uuid", Email: "a@b.c", RegisteredAt: base}); err == nil {
+		t.Error("UpsertRegistration debería fallar con un id inválido")
+	}
+	if err := repo.UpsertProfile(context.Background(), repository.Profile{UserID: "no-es-uuid", Name: "n", Version: 1}); err == nil {
+		t.Error("UpsertProfile debería fallar con un id inválido")
+	}
+}
+
 func TestUserListEmptyTable(t *testing.T) {
 	repo, _ := newUserRepo(t)
 	users, total, err := repo.List(context.Background(), repository.UserFilter{}, 20, 0)

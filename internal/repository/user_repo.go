@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/discordia-grupo01/admin/internal/model"
 )
@@ -16,7 +17,31 @@ type UserFilter struct {
 	Status model.UserStatus
 }
 
+// Registration son los datos de la cuenta que llegan en users.account_registered.
+type Registration struct {
+	UserID       string
+	Email        string
+	Name         string
+	RegisteredAt time.Time
+}
+
+// Profile es la parte del perfil público que admin guarda (users.profile_updated).
+type Profile struct {
+	UserID  string
+	Name    string
+	Version int64
+}
+
 type UserRepository interface {
+	// UpsertRegistration da de alta al usuario (o completa la fila que creó un
+	// users.profile_updated que llegó antes). Es idempotente: repetirlo deja
+	// los mismos valores, y nunca toca el estado de suspensión ni pisa un
+	// nombre más nuevo que el del registro.
+	UpsertRegistration(ctx context.Context, r Registration) error
+	// UpsertProfile aplica la foto del perfil solo si su versión es mayor a la
+	// guardada, así un evento repetido o fuera de orden no pisa datos nuevos.
+	UpsertProfile(ctx context.Context, p Profile) error
+
 	// List devuelve una página de usuarios que cumplen el filtro, del más
 	// reciente al más viejo, y cuántos hay en total. Solo incluye usuarios cuyo
 	// registro ya llegó (registered_at no nulo).
@@ -29,6 +54,42 @@ type postgresUserRepository struct {
 
 func NewUserRepository(db *sql.DB) UserRepository {
 	return &postgresUserRepository{db: db}
+}
+
+func (r *postgresUserRepository) UpsertRegistration(ctx context.Context, reg Registration) error {
+	// profile_version = 0 significa que el nombre vino del registro: un
+	// users.profile_updated posterior (version >= 1) siempre lo reemplaza, y si
+	// ya había llegado, su nombre se conserva.
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO users (user_id, name, email, registered_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id) DO UPDATE SET
+			email         = EXCLUDED.email,
+			registered_at = EXCLUDED.registered_at,
+			name          = CASE WHEN users.profile_version = 0 THEN EXCLUDED.name ELSE users.name END,
+			updated_at    = now()`,
+		reg.UserID, reg.Name, reg.Email, reg.RegisteredAt)
+	if err != nil {
+		return fmt.Errorf("guardar el registro de %s: %w", reg.UserID, err)
+	}
+	return nil
+}
+
+func (r *postgresUserRepository) UpsertProfile(ctx context.Context, p Profile) error {
+	// El WHERE del DO UPDATE descarta las fotos con versión igual o menor.
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO users (user_id, name, profile_version)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id) DO UPDATE SET
+			name            = EXCLUDED.name,
+			profile_version = EXCLUDED.profile_version,
+			updated_at      = now()
+		WHERE users.profile_version < EXCLUDED.profile_version`,
+		p.UserID, p.Name, p.Version)
+	if err != nil {
+		return fmt.Errorf("guardar el perfil de %s: %w", p.UserID, err)
+	}
+	return nil
 }
 
 // likeEscaper escapa los comodines de LIKE para que la búsqueda trate % y _

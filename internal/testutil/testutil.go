@@ -4,6 +4,7 @@
 package testutil
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"strings"
@@ -50,8 +51,28 @@ func OpenDB(t *testing.T) *sql.DB {
 		t.Fatalf("la base de test no responde: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+
+	// `go test ./...` corre los paquetes en paralelo y todos comparten la misma
+	// base: sin esto un test vacía tablas que otro está usando. El lock de
+	// sesión serializa los tests de integración, sin importar los flags (-p).
+	// Se libera al terminar el test, después de que se limpien las tablas
+	// (los Cleanup corren en orden inverso).
+	lock, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("tomar una conexión para el lock: %v", err)
+	}
+	if _, err := lock.ExecContext(context.Background(), `SELECT pg_advisory_lock($1)`, advisoryLockID); err != nil {
+		t.Fatalf("tomar el lock de tests de integración: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = lock.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, advisoryLockID)
+		_ = lock.Close()
+	})
 	return db
 }
+
+// advisoryLockID identifica el lock que serializa los tests de integración.
+const advisoryLockID = 727001
 
 // Truncate vacía las tablas indicadas y vuelve a vaciarlas al terminar el test.
 func Truncate(t *testing.T, db *sql.DB, tables ...string) {

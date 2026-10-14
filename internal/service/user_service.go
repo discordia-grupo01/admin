@@ -28,6 +28,17 @@ func NewUserService(users repository.UserRepository) *UserService {
 	return &UserService{users: users}
 }
 
+// ApplyRegistration da de alta al usuario en la réplica (users.account_registered).
+func (s *UserService) ApplyRegistration(ctx context.Context, r repository.Registration) error {
+	return s.users.UpsertRegistration(ctx, r)
+}
+
+// ApplyProfile actualiza el nombre del usuario (users.profile_updated); se
+// ignora si la versión no es mayor a la guardada.
+func (s *UserService) ApplyProfile(ctx context.Context, p repository.Profile) error {
+	return s.users.UpsertProfile(ctx, p)
+}
+
 // List devuelve una página de usuarios con los filtros pedidos. El límite se
 // normaliza (default 20, máximo 100).
 func (s *UserService) List(ctx context.Context, p ListUsersParams) (*model.UserList, error) {

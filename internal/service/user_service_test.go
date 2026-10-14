@@ -17,12 +17,48 @@ type fakeUserRepo struct {
 	limit  int
 	offset int
 	called bool
+
+	registration *repository.Registration
+	profile      *repository.Profile
 }
 
 func (f *fakeUserRepo) List(_ context.Context, filter repository.UserFilter, limit, offset int) ([]model.User, int, error) {
 	f.called = true
 	f.filter, f.limit, f.offset = filter, limit, offset
 	return f.users, f.total, f.err
+}
+
+func (f *fakeUserRepo) UpsertRegistration(_ context.Context, r repository.Registration) error {
+	f.registration = &r
+	return f.err
+}
+
+func (f *fakeUserRepo) UpsertProfile(_ context.Context, p repository.Profile) error {
+	f.profile = &p
+	return f.err
+}
+
+func TestApplyDelegatesToRepository(t *testing.T) {
+	repo := &fakeUserRepo{}
+	svc := NewUserService(repo)
+	reg := repository.Registration{UserID: "u1", Email: "a@b.c", Name: "A"}
+	prof := repository.Profile{UserID: "u1", Name: "B", Version: 2}
+
+	if err := svc.ApplyRegistration(context.Background(), reg); err != nil || repo.registration == nil || *repo.registration != reg {
+		t.Errorf("ApplyRegistration: err=%v repo=%+v", err, repo.registration)
+	}
+	if err := svc.ApplyProfile(context.Background(), prof); err != nil || repo.profile == nil || *repo.profile != prof {
+		t.Errorf("ApplyProfile: err=%v repo=%+v", err, repo.profile)
+	}
+
+	boom := errors.New("boom")
+	repo.err = boom
+	if err := svc.ApplyRegistration(context.Background(), reg); !errors.Is(err, boom) {
+		t.Errorf("ApplyRegistration debe propagar el error de la base: %v", err)
+	}
+	if err := svc.ApplyProfile(context.Background(), prof); !errors.Is(err, boom) {
+		t.Errorf("ApplyProfile debe propagar el error de la base: %v", err)
+	}
 }
 
 func TestListPassesFiltersAndPagination(t *testing.T) {
