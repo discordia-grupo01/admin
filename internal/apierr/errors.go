@@ -10,11 +10,14 @@ import (
 )
 
 const (
-	CodeSessionExpired = "SESSION_EXPIRED"
-	CodeForbidden      = "FORBIDDEN"
-	CodeNotFound       = "NOT_FOUND"
-	CodeInternal       = "INTERNAL_ERROR"
-	CodeInvalidQuery   = "INVALID_QUERY"
+	CodeSessionExpired       = "SESSION_EXPIRED"
+	CodeForbidden            = "FORBIDDEN"
+	CodeNotFound             = "NOT_FOUND"
+	CodeInternal             = "INTERNAL_ERROR"
+	CodeInvalidQuery         = "INVALID_QUERY"
+	CodeUserNotFound         = "USER_NOT_FOUND"
+	CodeCannotSuspendStaff   = "CANNOT_SUSPEND_STAFF"
+	CodeUserAlreadySuspended = "USER_ALREADY_SUSPENDED"
 )
 
 type Body struct {

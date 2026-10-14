@@ -7,10 +7,10 @@ info:
     `/v1/admin/*` requieren `Authorization: Bearer <JWT>` de un usuario que sea
     staff de la plataforma.
 
-    **Estado**: implementados `/livez`, `/readyz`, `GET /v1/admin/users` (#31)
-    y `GET /v1/admin/servers` (#32). Los demás endpoints de `/v1/admin` son el
-    contrato acordado y se implementan en las ramas de cada historia (#29
-    suspender, #30 reactivar).
+    **Estado**: implementados `/livez`, `/readyz`, `GET /v1/admin/users` (#31),
+    `GET /v1/admin/servers` (#32) y `POST /v1/admin/users/{id}/suspension`
+    (#29). El `DELETE` de la misma ruta (#30, reactivar) es el contrato acordado
+    y se implementa en su rama.
 
     **Consistencia eventual**: suspender o reactivar cambia el estado en admin
     al instante y publica un evento; los demás servicios lo aplican a los pocos
@@ -102,9 +102,12 @@ paths:
       tags: [Users]
       summary: Suspender a un usuario (HU #29)
       description: |
-        Impide que el usuario inicie sesión y use la plataforma. Publica
-        `admin.user_suspended`. No se puede suspender a un miembro del staff
-        (incluido uno mismo).
+        Impide que el usuario inicie sesión y use la plataforma. El estado
+        cambia en admin al instante y, en la misma transacción, queda escrito
+        el evento `admin.user_suspended` (firmado con HMAC) para que lo publique
+        el outbox; los demás servicios lo aplican a los pocos instantes. No se
+        puede suspender a un miembro del staff (incluido uno mismo). Un `{id}`
+        que no es un UUID se trata como usuario inexistente.
       responses:
         "200":
           description: Usuario suspendido
