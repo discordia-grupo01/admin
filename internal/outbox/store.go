@@ -36,7 +36,7 @@ func (s *PostgresStore) Dispatch(ctx context.Context, limit int, publish func(co
 		SELECT id, routing_key, payload
 		  FROM outbox_events
 		 WHERE published_at IS NULL
-		 ORDER BY created_at, id
+		 ORDER BY seq
 		 LIMIT $1
 		 FOR UPDATE SKIP LOCKED`, limit)
 	if err != nil {

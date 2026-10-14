@@ -3,7 +3,11 @@ services:
     build: .
     ports:
       - "8080:8080"
-    env_file: .env
+    # Opcional: sin .env, `docker compose ps/exec` (y el resto de los servicios)
+    # siguen funcionando; solo `api` necesita las variables para arrancar.
+    env_file:
+      - path: .env
+        required: false
     environment:
       # Dentro de la red de compose los servicios se alcanzan por nombre.
       DATABASE_HOST: db
