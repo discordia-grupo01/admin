@@ -20,12 +20,26 @@ type fakeUserRepo struct {
 
 	registration *repository.Registration
 	profile      *repository.Profile
+
+	foundID  string
+	lookedUp string
 }
 
 func (f *fakeUserRepo) List(_ context.Context, filter repository.UserFilter, limit, offset int) ([]model.User, int, error) {
 	f.called = true
 	f.filter, f.limit, f.offset = filter, limit, offset
 	return f.users, f.total, f.err
+}
+
+func (f *fakeUserRepo) FindIDByEmail(_ context.Context, email string) (string, error) {
+	f.lookedUp = email
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.foundID == "" {
+		return "", repository.ErrUserNotFound
+	}
+	return f.foundID, nil
 }
 
 func (f *fakeUserRepo) UpsertRegistration(_ context.Context, r repository.Registration) error {

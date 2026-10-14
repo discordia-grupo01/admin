@@ -113,6 +113,24 @@ func TestLoadSchemaValidation(t *testing.T) {
 	}
 }
 
+// LoadDatabase es para las herramientas de línea de comandos: no exige los
+// secretos del servicio, pero valida la conexión igual que Load.
+func TestLoadDatabaseDoesNotRequireServiceSecrets(t *testing.T) {
+	db, err := LoadDatabase(env(map[string]string{"DATABASE_HOST": "db", "DATABASE_PORT": "5433", "DATABASE_SCHEMA": "admin"}))
+	if err != nil {
+		t.Fatalf("LoadDatabase: %v", err)
+	}
+	if db.Host != "db" || db.Port != "5433" || db.Name != "discordia_admin" || db.Schema != "admin" {
+		t.Errorf("database = %+v", db)
+	}
+}
+
+func TestLoadDatabaseRejectsInvalidSchema(t *testing.T) {
+	if _, err := LoadDatabase(env(map[string]string{"DATABASE_SCHEMA": "admin; DROP TABLE x"})); err == nil {
+		t.Fatal("un schema con caracteres peligrosos debería fallar")
+	}
+}
+
 func TestDSNQuotesValues(t *testing.T) {
 	d := Database{Host: "h", Port: "5432", Name: "db", User: "u", Password: `p a'ss\`, SSLMode: "require", Schema: "admin"}
 	got := d.DSN()

@@ -3,6 +3,7 @@ package repository_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -315,6 +316,32 @@ func TestUpsertRejectsInvalidUserID(t *testing.T) {
 	}
 	if err := repo.UpsertProfile(context.Background(), repository.Profile{UserID: "no-es-uuid", Name: "n", Version: 1}); err == nil {
 		t.Error("UpsertProfile debería fallar con un id inválido")
+	}
+}
+
+func TestFindIDByEmail(t *testing.T) {
+	repo, db := newUserRepo(t)
+	seed(t, db, []seedUser{
+		{1, "Manu", "Manu@Example.com", 0, false},
+		{2, "Sin registro", "fantasma@example.com", -1, false}, // llegó el perfil, no el alta
+	})
+	ctx := context.Background()
+
+	// Coincidencia exacta, sin distinguir mayúsculas.
+	for _, email := range []string{"manu@example.com", "MANU@EXAMPLE.COM", "Manu@Example.com"} {
+		if id, err := repo.FindIDByEmail(ctx, email); err != nil || id != uid(1) {
+			t.Errorf("%q → id=%q err=%v", email, id, err)
+		}
+	}
+	// No es una búsqueda parcial: un fragmento no alcanza.
+	for _, email := range []string{"manu", "manu@example", "otro@example.com", "", "%"} {
+		if _, err := repo.FindIDByEmail(ctx, email); !errors.Is(err, repository.ErrUserNotFound) {
+			t.Errorf("%q debería ser ErrUserNotFound, obtuve %v", email, err)
+		}
+	}
+	// Un usuario sin alta registrada todavía no se puede encontrar.
+	if _, err := repo.FindIDByEmail(ctx, "fantasma@example.com"); !errors.Is(err, repository.ErrUserNotFound) {
+		t.Errorf("sin registro: err = %v", err)
 	}
 }
 

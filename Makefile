@@ -1,4 +1,4 @@
-.PHONY: run test test-integration build migrate
+.PHONY: run test test-integration build migrate seed-staff
 
 -include .env
 export
@@ -28,6 +28,12 @@ build:
 # tiene caracteres especiales (@, :, /, #) hay que codificarla en la URL.
 migrate:
 	$(MIGRATE) -path migrations -database "postgres://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)?sslmode=$(DATABASE_SSLMODE)$(if $(DATABASE_SCHEMA),&search_path=$(DATABASE_SCHEMA),)" up
+
+# Da de alta como staff al usuario con ese email (tiene que estar en la réplica
+# de usuarios). Uso: make seed-staff EMAIL=manu@example.com
+seed-staff:
+	@test -n "$(EMAIL)" || (echo "falta EMAIL: make seed-staff EMAIL=manu@example.com" >&2; exit 1)
+	go run ./cmd/seedstaff --email "$(EMAIL)"
 
 # Corre también los tests de integración contra el Postgres y el RabbitMQ de
 # docker-compose (`docker compose up -d db rabbitmq`). Usa una base aparte,

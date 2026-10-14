@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/discordia-grupo01/admin/internal/repository"
 )
@@ -15,6 +16,30 @@ type StaffService struct {
 
 func NewStaffService(repo repository.StaffRepository) *StaffService {
 	return &StaffService{repo: repo}
+}
+
+// UserLookup busca el id de un usuario por su email (lo implementa UserService).
+type UserLookup interface {
+	FindIDByEmail(ctx context.Context, email string) (string, error)
+}
+
+// SeedByEmail da de alta como staff al usuario con ese email, buscándolo en la
+// réplica de usuarios, y devuelve su id. Es la forma de sembrar staff cuando
+// solo se conoce el email. Falla con repository.ErrUserNotFound si el usuario
+// no está en la réplica (todavía no se registró o su alta no llegó).
+func (s *StaffService) SeedByEmail(ctx context.Context, users UserLookup, email string) (string, error) {
+	email = strings.TrimSpace(email)
+	if !strings.Contains(email, "@") {
+		return "", fmt.Errorf("%q no parece un email", email)
+	}
+	id, err := users.FindIDByEmail(ctx, email)
+	if err != nil {
+		return "", err
+	}
+	if err := s.Seed(ctx, []string{id}); err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 func (s *StaffService) IsStaff(ctx context.Context, userID string) (bool, error) {

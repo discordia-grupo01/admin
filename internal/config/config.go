@@ -74,29 +74,53 @@ func quote(v string) string {
 	return "'" + v + "'"
 }
 
+func getOr(getenv func(string) string, key, def string) string {
+	if v := strings.TrimSpace(getenv(key)); v != "" {
+		return v
+	}
+	return def
+}
+
+func databaseFromEnv(getenv func(string) string) Database {
+	return Database{
+		Host:     getOr(getenv, "DATABASE_HOST", "localhost"),
+		Port:     getOr(getenv, "DATABASE_PORT", "5432"),
+		Name:     getOr(getenv, "DATABASE_NAME", "discordia_admin"),
+		User:     getOr(getenv, "DATABASE_USER", "discordia"),
+		Password: getenv("DATABASE_PASSWORD"),
+		SSLMode:  getOr(getenv, "DATABASE_SSLMODE", "disable"),
+		Schema:   getOr(getenv, "DATABASE_SCHEMA", ""),
+	}
+}
+
+func (d Database) validate() error {
+	if d.Schema != "" && !schemaPattern.MatchString(d.Schema) {
+		return fmt.Errorf("DATABASE_SCHEMA %q inválido: solo letras, números y _", d.Schema)
+	}
+	return nil
+}
+
+// LoadDatabase lee solo la conexión a la base. Es para las herramientas de
+// línea de comandos (cmd/seedstaff), que no necesitan los secretos del servicio
+// (JWT, RabbitMQ, firma de eventos).
+func LoadDatabase(getenv func(string) string) (Database, error) {
+	db := databaseFromEnv(getenv)
+	if err := db.validate(); err != nil {
+		return Database{}, err
+	}
+	return db, nil
+}
+
 // Load lee la configuración con getenv (os.Getenv en producción; un map en los
 // tests) y devuelve todos los errores de validación juntos.
 func Load(getenv func(string) string) (Config, error) {
-	get := func(key, def string) string {
-		if v := strings.TrimSpace(getenv(key)); v != "" {
-			return v
-		}
-		return def
-	}
+	get := func(key, def string) string { return getOr(getenv, key, def) }
 
 	cfg := Config{
-		Environment: get("ENVIRONMENT", EnvDevelopment),
-		Host:        get("HOST", "0.0.0.0"),
-		Port:        get("PORT", "8080"),
-		Database: Database{
-			Host:     get("DATABASE_HOST", "localhost"),
-			Port:     get("DATABASE_PORT", "5432"),
-			Name:     get("DATABASE_NAME", "discordia_admin"),
-			User:     get("DATABASE_USER", "discordia"),
-			Password: getenv("DATABASE_PASSWORD"),
-			SSLMode:  get("DATABASE_SSLMODE", "disable"),
-			Schema:   get("DATABASE_SCHEMA", ""),
-		},
+		Environment:           get("ENVIRONMENT", EnvDevelopment),
+		Host:                  get("HOST", "0.0.0.0"),
+		Port:                  get("PORT", "8080"),
+		Database:              databaseFromEnv(getenv),
 		JWTSecret:             getenv("JWT_SECRET"),
 		RabbitMQURL:           getenv("RABBITMQ_URL"),
 		AdminEventsHMACSecret: getenv("ADMIN_EVENTS_HMAC_SECRET"),
@@ -117,8 +141,8 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.AdminEventsHMACSecret == "" {
 		errs = append(errs, errors.New("ADMIN_EVENTS_HMAC_SECRET es obligatorio (firma de eventos admin.*)"))
 	}
-	if cfg.Database.Schema != "" && !schemaPattern.MatchString(cfg.Database.Schema) {
-		errs = append(errs, fmt.Errorf("DATABASE_SCHEMA %q inválido: solo letras, números y _", cfg.Database.Schema))
+	if err := cfg.Database.validate(); err != nil {
+		errs = append(errs, err)
 	}
 
 	if raw := strings.TrimSpace(getenv("OUTBOX_POLL_INTERVAL")); raw != "" {

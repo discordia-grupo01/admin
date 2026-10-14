@@ -28,6 +28,12 @@ func NewUserService(users repository.UserRepository) *UserService {
 	return &UserService{users: users}
 }
 
+// FindIDByEmail devuelve el id del usuario con ese email, o
+// repository.ErrUserNotFound.
+func (s *UserService) FindIDByEmail(ctx context.Context, email string) (string, error) {
+	return s.users.FindIDByEmail(ctx, email)
+}
+
 // ApplyRegistration da de alta al usuario en la réplica (users.account_registered).
 func (s *UserService) ApplyRegistration(ctx context.Context, r repository.Registration) error {
 	return s.users.UpsertRegistration(ctx, r)

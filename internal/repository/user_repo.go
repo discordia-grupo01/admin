@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,6 +17,9 @@ type UserFilter struct {
 	Search string
 	Status model.UserStatus
 }
+
+// ErrUserNotFound indica que no hay un usuario registrado con ese dato en la réplica.
+var ErrUserNotFound = errors.New("usuario no encontrado")
 
 // Registration son los datos de la cuenta que llegan en users.account_registered.
 type Registration struct {
@@ -33,6 +37,9 @@ type Profile struct {
 }
 
 type UserRepository interface {
+	// FindIDByEmail devuelve el id del usuario con ese email exacto (sin
+	// distinguir mayúsculas), o ErrUserNotFound. Solo ve usuarios con registro.
+	FindIDByEmail(ctx context.Context, email string) (string, error)
 	// UpsertRegistration da de alta al usuario (o completa la fila que creó un
 	// users.profile_updated que llegó antes). Es idempotente: repetirlo deja
 	// los mismos valores, y nunca toca el estado de suspensión ni pisa un
@@ -54,6 +61,22 @@ type postgresUserRepository struct {
 
 func NewUserRepository(db *sql.DB) UserRepository {
 	return &postgresUserRepository{db: db}
+}
+
+func (r *postgresUserRepository) FindIDByEmail(ctx context.Context, email string) (string, error) {
+	var id string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT user_id FROM users
+		 WHERE registered_at IS NOT NULL AND lower(email) = lower($1)
+		 ORDER BY registered_at
+		 LIMIT 1`, email).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrUserNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("buscar el usuario por email: %w", err)
+	}
+	return id, nil
 }
 
 func (r *postgresUserRepository) UpsertRegistration(ctx context.Context, reg Registration) error {
