@@ -2,7 +2,7 @@
 
 Servicio de **Administración** de Discordia: la API del backoffice para el staff de la plataforma. Cubre las historias #29 (suspender usuario), #30 (reactivar usuario), #31 (listado de usuarios con filtros) y #32 (listado de servidores).
 
-> **Estado**: implementados `GET /v1/admin/users` (#31) y `GET /v1/admin/servers` (#32), la base del servicio (configuración, autenticación de staff, outbox, RabbitMQ, `/livez` y `/readyz`) y el alta de staff. Faltan suspender (#29) y reactivar (#30); sus endpoints ya están definidos en [`openapi.yaml`](openapi.yaml).
+> **Estado**: implementados `GET /v1/admin/users` (#31), `GET /v1/admin/servers` (#32) y `POST /v1/admin/users/{id}/suspension` (#29), la base del servicio (configuración, autenticación de staff, outbox, RabbitMQ, `/livez` y `/readyz`) y el alta de staff. Falta reactivar (#30); su endpoint ya está definido en [`openapi.yaml`](openapi.yaml).
 
 ## Stack
 - Lenguaje: Go
@@ -70,7 +70,7 @@ discordia-admin/
 │   ├── config/              carga y validación del entorno
 │   ├── apierr/              formato de error {error:{code,message,details}}
 │   ├── middleware/          autenticación (JWT) y autorización (staff)
-│   ├── handler/             router y handlers HTTP (health, usuarios, servidores)
+│   ├── handler/             router y handlers HTTP (health, usuarios, servidores, suspensión)
 │   ├── service/             lógica de negocio
 │   ├── repository/          acceso a PostgreSQL
 │   ├── audit/               registro de eventos consumidos
@@ -103,7 +103,9 @@ Esquemas en [`discordia-docs`](https://github.com/discordia-grupo01/docs) (`asyn
 
 **Consume** (cola `admin.users`, ack manual): `users.account_registered` y `users.profile_updated`. Alimentan la réplica de usuarios del listado. Son idempotentes y toleran desorden: el perfil se aplica solo si su `version` es mayor a la guardada, y un usuario no aparece hasta que llega su alta. Los mensajes inválidos (JSON roto, id que no es UUID, etc.) se descartan y quedan en `consumed_events`; las fallas de base se reencolan.
 
-**Publica**: todavía nada. Con las próximas historias: `admin.user_suspended` y `admin.user_reactivated` (firmados con HMAC).
+**Publica** (outbox → `discordia.events`): `admin.user_suspended`, con `user_id` y `version`, sin motivo ni email. Se escribe en `outbox_events` en la misma transacción que el cambio de estado, así que una caída de RabbitMQ lo demora pero no lo pierde. Lleva una firma HMAC-SHA256 (`ADMIN_EVENTS_HMAC_SECRET`, helper `Sign`/`Verify` de `events-contract`) que cada consumidor tiene que verificar antes de aplicarlo; `version` sube con cada suspensión o reactivación del usuario y los consumidores ignoran las que no son mayores a la que ya tienen. Con la historia #30 se suma `admin.user_reactivated`.
+
+**Consistencia eventual**: `POST /v1/admin/users/{id}/suspension` suspende al usuario en admin al instante, pero identify, servers, messaging y voz lo bloquean recién cuando procesan el evento (normalmente menos de un segundo). Por esa ventana el usuario podría operar unos instantes; no se hace ninguna llamada síncrona para cerrarla.
 
 **Consume** (cola `admin.servers`, ack manual): `servers.server_updated`, `servers.server_deleted`, `servers.member_joined` y `servers.member_left`. Alimentan la réplica de servidores del listado. Ninguno trae versión, así que se ordenan por `occurred_at`: gana la foto de servidor más nueva y, por cada par servidor-usuario, el último evento de membresía. `server_deleted` deja el servidor marcado como borrado (un `server_updated` tardío no lo resucita) y descarta sus membresías. Un servidor no aparece hasta que llega su `server_updated`. Los mensajes inválidos se descartan y quedan en `consumed_events`; las fallas de base se reencolan.
 

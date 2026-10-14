@@ -46,7 +46,9 @@ func (s *SuspensionService) Suspend(ctx context.Context, userID, staffID string)
 	}
 	userID = parsed.String()
 
-	at := s.now().UTC()
+	// Postgres guarda microsegundos: se trunca acá para que la respuesta, el
+	// evento y el listado muestren exactamente la misma hora.
+	at := s.now().UTC().Truncate(time.Microsecond)
 	u, err := s.repo.Suspend(ctx, userID, staffID, at, func(version int64) (string, any) {
 		e := admin.UserSuspended{
 			Meta:    envelope.Meta{EventID: s.newEventID(), OccurredAt: at},

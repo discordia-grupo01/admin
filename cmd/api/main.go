@@ -88,6 +88,11 @@ func run() error {
 		serverConsumer.Start(ctx)
 	}()
 
+	// Suspender cambia el estado y deja el evento firmado en el outbox, que el
+	// poller de arriba publica.
+	suspensions := handler.NewSuspensionHandler(
+		service.NewSuspensionService(repository.NewSuspensionRepository(db), cfg.AdminEventsHMACSecret))
+
 	router := handler.NewRouter(handler.Deps{
 		JWTSecret: []byte(cfg.JWTSecret),
 		Staff:     staff,
@@ -95,7 +100,7 @@ func run() error {
 			handler.Check{Name: "postgres", Fn: db.PingContext},
 			handler.Check{Name: "rabbitmq", Fn: func(context.Context) error { return publisher.Ping() }},
 		),
-	}, users.Register, handler.NewServerHandler(serverService).Register)
+	}, users.Register, handler.NewServerHandler(serverService).Register, suspensions.Register)
 
 	server := &http.Server{
 		Addr:              cfg.Addr(),

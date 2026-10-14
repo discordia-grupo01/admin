@@ -58,6 +58,9 @@ func TestSuspendBuildsASignedEvent(t *testing.T) {
 	if repo.at.Location() != time.UTC {
 		t.Errorf("la hora debe pasarse en UTC: %v", repo.at)
 	}
+	if repo.at.Nanosecond()%1000 != 0 {
+		t.Errorf("la hora debe truncarse a microsegundos (precisión de Postgres): %v", repo.at)
+	}
 
 	if repo.key != admin.RoutingKeyUserSuspended {
 		t.Fatalf("routing key = %q", repo.key)
