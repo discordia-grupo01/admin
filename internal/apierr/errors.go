@@ -11,6 +11,7 @@ import (
 const (
 	CodeSessionExpired = "SESSION_EXPIRED"
 	CodeForbidden      = "FORBIDDEN"
+	CodeNotFound       = "NOT_FOUND"
 	CodeInternal       = "INTERNAL_ERROR"
 	CodeInvalidQuery   = "INVALID_QUERY"
 )
@@ -39,6 +40,10 @@ func Unauthorized(c *gin.Context) {
 
 func Forbidden(c *gin.Context) {
 	Abort(c, http.StatusForbidden, CodeForbidden, "No tenés permisos de staff para realizar esta acción", nil)
+}
+
+func NotFound(c *gin.Context) {
+	Abort(c, http.StatusNotFound, CodeNotFound, "El recurso solicitado no existe", nil)
 }
 
 func Internal(c *gin.Context) {
