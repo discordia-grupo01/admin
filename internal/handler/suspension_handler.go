@@ -16,6 +16,7 @@ import (
 // UserSuspender es lo que el handler necesita del servicio de suspensión.
 type UserSuspender interface {
 	Suspend(ctx context.Context, userID, staffID string) (*model.User, error)
+	Reactivate(ctx context.Context, userID string) (*model.User, error)
 }
 
 type SuspensionHandler struct {
@@ -29,6 +30,7 @@ func NewSuspensionHandler(suspender UserSuspender) *SuspensionHandler {
 // Register agrega las rutas de suspensión al grupo /v1/admin.
 func (h *SuspensionHandler) Register(admin *gin.RouterGroup) {
 	admin.POST("/users/:id/suspension", h.Suspend)
+	admin.DELETE("/users/:id/suspension", h.Reactivate)
 }
 
 // Suspend atiende POST /v1/admin/users/{id}/suspension (HU #29). La suspensión
@@ -40,7 +42,7 @@ func (h *SuspensionHandler) Suspend(c *gin.Context) {
 	case err == nil:
 		c.JSON(http.StatusOK, u)
 	case errors.Is(err, service.ErrUserNotFound):
-		apierr.Abort(c, http.StatusNotFound, apierr.CodeUserNotFound, "El usuario no existe", nil)
+		userNotFound(c)
 	case errors.Is(err, service.ErrCannotSuspendStaff):
 		apierr.Abort(c, http.StatusForbidden, apierr.CodeCannotSuspendStaff, "No se puede suspender a un miembro del staff", nil)
 	case errors.Is(err, service.ErrUserAlreadySuspended):
@@ -49,4 +51,26 @@ func (h *SuspensionHandler) Suspend(c *gin.Context) {
 		log.Printf("handler: no se pudo suspender al usuario %q: %v", c.Param("id"), err)
 		apierr.Internal(c)
 	}
+}
+
+// Reactivate atiende DELETE /v1/admin/users/{id}/suspension (HU #30). El estado
+// vuelve a activo en admin al instante; los demás servicios levantan el bloqueo
+// al procesar el evento admin.user_reactivated.
+func (h *SuspensionHandler) Reactivate(c *gin.Context) {
+	u, err := h.suspender.Reactivate(c.Request.Context(), c.Param("id"))
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, u)
+	case errors.Is(err, service.ErrUserNotFound):
+		userNotFound(c)
+	case errors.Is(err, service.ErrUserNotSuspended):
+		apierr.Abort(c, http.StatusConflict, apierr.CodeUserNotSuspended, "El usuario no está suspendido", nil)
+	default:
+		log.Printf("handler: no se pudo reactivar al usuario %q: %v", c.Param("id"), err)
+		apierr.Internal(c)
+	}
+}
+
+func userNotFound(c *gin.Context) {
+	apierr.Abort(c, http.StatusNotFound, apierr.CodeUserNotFound, "El usuario no existe", nil)
 }

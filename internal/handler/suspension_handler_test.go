@@ -22,11 +22,20 @@ type fakeSuspender struct {
 	called  bool
 	gotUser string
 	gotBy   string
+	action  string
 }
 
 func (f *fakeSuspender) Suspend(_ context.Context, userID, staffID string) (*model.User, error) {
 	f.called = true
+	f.action = "suspend"
 	f.gotUser, f.gotBy = userID, staffID
+	return f.user, f.err
+}
+
+func (f *fakeSuspender) Reactivate(_ context.Context, userID string) (*model.User, error) {
+	f.called = true
+	f.action = "reactivate"
+	f.gotUser = userID
 	return f.user, f.err
 }
 
@@ -37,6 +46,16 @@ func suspensionRouter(s UserSuspender) http.Handler {
 
 func post(r http.Handler, path, auth string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, path, nil)
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func del(r http.Handler, path, auth string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodDelete, path, nil)
 	if auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
@@ -118,6 +137,88 @@ func TestSuspendRequiresStaff(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &fakeSuspender{user: &model.User{}}
 			w := post(suspensionRouter(s), "/v1/admin/users/"+targetID+"/suspension", tc.auth)
+			if w.Code != tc.status {
+				t.Fatalf("status = %d, quería %d", w.Code, tc.status)
+			}
+			if s.called {
+				t.Error("el servicio no debe ejecutarse sin autorización")
+			}
+		})
+	}
+}
+
+func TestReactivateReturnsTheUpdatedUser(t *testing.T) {
+	s := &fakeSuspender{user: &model.User{
+		ID: targetID, Name: "Ale", Email: "ale@example.com", Status: model.UserStatusActive,
+		CreatedAt: time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC),
+	}}
+	w := del(suspensionRouter(s), "/v1/admin/users/"+targetID+"/suspension", bearer(t, staffID))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["id"] != targetID || body["status"] != "active" {
+		t.Errorf("body: %v", body)
+	}
+	if v, present := body["suspended_at"]; !present || v != nil {
+		t.Errorf("un usuario reactivado lleva suspended_at null (presente), no %v", v)
+	}
+	if s.action != "reactivate" || s.gotUser != targetID {
+		t.Errorf("acción=%q user=%q", s.action, s.gotUser)
+	}
+}
+
+func TestReactivateMapsBusinessErrors(t *testing.T) {
+	cases := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{service.ErrUserNotFound, http.StatusNotFound, apierr.CodeUserNotFound},
+		{service.ErrUserNotSuspended, http.StatusConflict, apierr.CodeUserNotSuspended},
+		{fmt.Errorf("reactivar usuario: %w", service.ErrUserNotSuspended), http.StatusConflict, apierr.CodeUserNotSuspended},
+	}
+	for _, tc := range cases {
+		t.Run(tc.code, func(t *testing.T) {
+			w := del(suspensionRouter(&fakeSuspender{err: tc.err}), "/v1/admin/users/"+targetID+"/suspension", bearer(t, staffID))
+			var body apierr.ErrorResponse
+			_ = json.Unmarshal(w.Body.Bytes(), &body)
+			if w.Code != tc.status || body.Error.Code != tc.code {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestReactivateUnexpectedErrorIsInternal(t *testing.T) {
+	w := del(suspensionRouter(&fakeSuspender{err: errors.New("db caída")}), "/v1/admin/users/"+targetID+"/suspension", bearer(t, staffID))
+	var body apierr.ErrorResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if w.Code != http.StatusInternalServerError || body.Error.Code != apierr.CodeInternal {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "db caída") {
+		t.Error("el detalle del error interno no debe llegar al cliente")
+	}
+}
+
+// Un usuario sin rol de staff no puede reactivar a nadie (CA2).
+func TestReactivateRequiresStaff(t *testing.T) {
+	cases := []struct {
+		name, auth string
+		status     int
+	}{
+		{"sin token", "", http.StatusUnauthorized},
+		{"no es staff", bearer(t, userID), http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &fakeSuspender{user: &model.User{}}
+			w := del(suspensionRouter(s), "/v1/admin/users/"+targetID+"/suspension", tc.auth)
 			if w.Code != tc.status {
 				t.Fatalf("status = %d, quería %d", w.Code, tc.status)
 			}
