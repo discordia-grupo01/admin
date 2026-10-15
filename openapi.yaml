@@ -7,10 +7,9 @@ info:
     `/v1/admin/*` requieren `Authorization: Bearer <JWT>` de un usuario que sea
     staff de la plataforma.
 
-    **Estado**: implementados `/livez`, `/readyz`, `GET /v1/admin/users` (#31),
-    `GET /v1/admin/servers` (#32) y `POST /v1/admin/users/{id}/suspension`
-    (#29). El `DELETE` de la misma ruta (#30, reactivar) es el contrato acordado
-    y se implementa en su rama.
+    **Estado**: implementados todos los endpoints: `/livez`, `/readyz`,
+    `GET /v1/admin/users` (#31), `GET /v1/admin/servers` (#32) y
+    `POST` / `DELETE /v1/admin/users/{id}/suspension` (#29 y #30).
 
     **Consistencia eventual**: suspender o reactivar cambia el estado en admin
     al instante y publica un evento; los demás servicios lo aplican a los pocos
@@ -133,7 +132,12 @@ paths:
     delete:
       tags: [Users]
       summary: Reactivar a un usuario suspendido (HU #30)
-      description: Levanta la suspensión. Publica `admin.user_reactivated`.
+      description: |
+        Levanta la suspensión: el usuario vuelve a estar activo en admin al
+        instante y, en la misma transacción, queda escrito el evento
+        `admin.user_reactivated` (firmado con HMAC) para que lo publique el
+        outbox. Los demás servicios dejan de bloquear al usuario al procesarlo.
+        Un `{id}` que no es un UUID se trata como usuario inexistente.
       responses:
         "200":
           description: Usuario reactivado

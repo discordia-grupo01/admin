@@ -18,6 +18,7 @@ const (
 	CodeUserNotFound         = "USER_NOT_FOUND"
 	CodeCannotSuspendStaff   = "CANNOT_SUSPEND_STAFF"
 	CodeUserAlreadySuspended = "USER_ALREADY_SUSPENDED"
+	CodeUserNotSuspended     = "USER_NOT_SUSPENDED"
 )
 
 type Body struct {

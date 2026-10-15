@@ -21,6 +21,8 @@ const (
 type fakeSuspensionRepo struct {
 	err error
 
+	suspended []repository.SuspendedUser
+
 	called  bool
 	userID  string
 	staffID string
@@ -37,6 +39,20 @@ func (f *fakeSuspensionRepo) Suspend(_ context.Context, userID, staffID string, 
 	}
 	f.key, f.payload = event(4)
 	return &model.User{ID: userID, Status: model.UserStatusSuspended, SuspendedAt: &at}, nil
+}
+
+func (f *fakeSuspensionRepo) Reactivate(_ context.Context, userID string, event repository.EventBuilder) (*model.User, error) {
+	f.called = true
+	f.userID = userID
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.key, f.payload = event(5)
+	return &model.User{ID: userID, Status: model.UserStatusActive}, nil
+}
+
+func (f *fakeSuspensionRepo) ListSuspended(context.Context) ([]repository.SuspendedUser, error) {
+	return f.suspended, f.err
 }
 
 func newSuspensionService(repo repository.SuspensionRepository) *SuspensionService {
@@ -111,5 +127,124 @@ func TestSuspendPropagatesBusinessErrors(t *testing.T) {
 	boom := errors.New("db caída")
 	if _, err := newSuspensionService(&fakeSuspensionRepo{err: boom}).Suspend(context.Background(), testUserID, testStaffID); !errors.Is(err, boom) {
 		t.Errorf("err = %v, quería el error de la base envuelto", err)
+	}
+}
+
+func TestReactivateBuildsASignedEventWithTheNewVersion(t *testing.T) {
+	repo := &fakeSuspensionRepo{}
+	u, err := newSuspensionService(repo).Reactivate(context.Background(), "7C1E5A3B-9D2F-4B8E-A6C4-3F1E9D7B5A2C")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Status != model.UserStatusActive || repo.userID != testUserID {
+		t.Errorf("usuario=%+v repo.userID=%q", u, repo.userID)
+	}
+	if repo.key != admin.RoutingKeyUserReactivated {
+		t.Fatalf("routing key = %q", repo.key)
+	}
+	raw, err := json.Marshal(repo.payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got admin.UserReactivated
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.EventID != "evento-1" || got.UserID != testUserID || got.Version != 5 {
+		t.Errorf("evento: %+v", got)
+	}
+	if !got.Verify(testSecret) || got.Verify("otro-secreto") {
+		t.Error("la firma debe verificar solo con el secreto de admin")
+	}
+	// No se puede reusar como suspensión.
+	if (admin.UserSuspended{Meta: got.Meta, UserID: got.UserID, Version: got.Version, Signature: got.Signature}).Verify(testSecret) {
+		t.Error("una firma de reactivación no debe valer como suspensión")
+	}
+}
+
+func TestReactivateTreatsAnInvalidIDAsNotFoundWithoutQuerying(t *testing.T) {
+	repo := &fakeSuspensionRepo{}
+	if _, err := newSuspensionService(repo).Reactivate(context.Background(), "abc"); !errors.Is(err, ErrUserNotFound) {
+		t.Errorf("err = %v", err)
+	}
+	if repo.called {
+		t.Error("un id inválido no debe llegar a la base")
+	}
+}
+
+func TestReactivatePropagatesBusinessErrors(t *testing.T) {
+	for _, want := range []error{ErrUserNotFound, ErrUserNotSuspended} {
+		if _, err := newSuspensionService(&fakeSuspensionRepo{err: want}).Reactivate(context.Background(), testUserID); !errors.Is(err, want) {
+			t.Errorf("err = %v, quería %v", err, want)
+		}
+	}
+}
+
+type fakePublisher struct {
+	keys     []string
+	payloads []any
+	failAt   int // 1-based; 0 = nunca falla
+	err      error
+}
+
+func (f *fakePublisher) Publish(_ context.Context, key string, payload any) error {
+	if f.failAt > 0 && len(f.keys)+1 == f.failAt {
+		return f.err
+	}
+	f.keys = append(f.keys, key)
+	f.payloads = append(f.payloads, payload)
+	return nil
+}
+
+func TestRepublishSuspensionsPublishesOneSignedEventPerSuspendedUser(t *testing.T) {
+	first := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	second := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	repo := &fakeSuspensionRepo{suspended: []repository.SuspendedUser{
+		{UserID: testUserID, Version: 1, SuspendedAt: first},
+		{UserID: testStaffID, Version: 3, SuspendedAt: second},
+	}}
+	pub := &fakePublisher{}
+
+	n, err := newSuspensionService(repo).RepublishSuspensions(context.Background(), pub)
+	if err != nil || n != 2 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	for i, want := range repo.suspended {
+		if pub.keys[i] != admin.RoutingKeyUserSuspended {
+			t.Errorf("routing key %d = %q", i, pub.keys[i])
+		}
+		e, ok := pub.payloads[i].(admin.UserSuspended)
+		if !ok {
+			t.Fatalf("payload %d: %T", i, pub.payloads[i])
+		}
+		if e.UserID != want.UserID || e.Version != want.Version || !e.OccurredAt.Equal(want.SuspendedAt) || !e.Verify(testSecret) {
+			t.Errorf("evento %d: %+v", i, e)
+		}
+	}
+}
+
+func TestRepublishSuspensionsWithNobodySuspendedPublishesNothing(t *testing.T) {
+	pub := &fakePublisher{}
+	n, err := newSuspensionService(&fakeSuspensionRepo{}).RepublishSuspensions(context.Background(), pub)
+	if err != nil || n != 0 || len(pub.keys) != 0 {
+		t.Errorf("n=%d err=%v publicados=%d", n, err, len(pub.keys))
+	}
+}
+
+func TestRepublishSuspensionsStopsAtTheFirstPublishError(t *testing.T) {
+	repo := &fakeSuspensionRepo{suspended: []repository.SuspendedUser{{UserID: "u1", Version: 1}, {UserID: "u2", Version: 1}, {UserID: "u3", Version: 1}}}
+	boom := errors.New("broker caído")
+	pub := &fakePublisher{failAt: 2, err: boom}
+
+	n, err := newSuspensionService(repo).RepublishSuspensions(context.Background(), pub)
+	if !errors.Is(err, boom) || n != 1 || len(pub.keys) != 1 {
+		t.Errorf("n=%d err=%v publicados=%d, quería cortar tras 1", n, err, len(pub.keys))
+	}
+}
+
+func TestRepublishSuspensionsPropagatesListError(t *testing.T) {
+	boom := errors.New("db caída")
+	if _, err := newSuspensionService(&fakeSuspensionRepo{err: boom}).RepublishSuspensions(context.Background(), &fakePublisher{}); !errors.Is(err, boom) {
+		t.Errorf("err = %v", err)
 	}
 }

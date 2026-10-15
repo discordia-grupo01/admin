@@ -198,3 +198,172 @@ func TestConcurrentSuspensionsOnlyOneWins(t *testing.T) {
 		t.Errorf("outbox = %v, quería exactamente un evento", got)
 	}
 }
+
+func TestReactivateClearsTheSuspensionAndWritesTheEvent(t *testing.T) {
+	repo, db := newSuspensionRepo(t)
+	seed(t, db, []seedUser{{n: 1, name: "Ale", email: "ale@example.com", registeredDaysAfter: 0}})
+	ctx := context.Background()
+	if _, err := repo.Suspend(ctx, uid(1), uid(99), suspendedAt, eventFor("admin.user_suspended")); err != nil {
+		t.Fatal(err)
+	}
+
+	u, err := repo.Reactivate(ctx, uid(1), eventFor("admin.user_reactivated"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.ID != uid(1) || u.Name != "Ale" || u.Status != model.UserStatusActive || u.SuspendedAt != nil {
+		t.Errorf("usuario devuelto: %+v", u)
+	}
+
+	var status string
+	var at, by sql.NullString
+	var version int64
+	if err := db.QueryRow(`SELECT status, suspended_at::text, suspended_by::text, suspension_version FROM users WHERE user_id = $1`, uid(1)).
+		Scan(&status, &at, &by, &version); err != nil {
+		t.Fatal(err)
+	}
+	if status != "active" || at.Valid || by.Valid || version != 2 {
+		t.Errorf("fila: status=%s suspended_at=%v suspended_by=%v version=%d", status, at, by, version)
+	}
+	// La versión del evento sube por encima de la de la suspensión.
+	if got := outboxRows(t, db); len(got) != 2 || got[0] != "admin.user_suspended 1" || got[1] != "admin.user_reactivated 2" {
+		t.Errorf("outbox = %v", got)
+	}
+}
+
+func TestSuspendReactivateSuspendKeepsVersionsGrowing(t *testing.T) {
+	repo, db := newSuspensionRepo(t)
+	seed(t, db, []seedUser{{n: 1, name: "Ale", email: "ale@example.com", registeredDaysAfter: 0}})
+	ctx := context.Background()
+
+	if _, err := repo.Suspend(ctx, uid(1), uid(99), suspendedAt, eventFor("admin.user_suspended")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Reactivate(ctx, uid(1), eventFor("admin.user_reactivated")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Suspend(ctx, uid(1), uid(99), suspendedAt, eventFor("admin.user_suspended")); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"admin.user_suspended 1", "admin.user_reactivated 2", "admin.user_suspended 3"}
+	if got := outboxRows(t, db); !equal(got, want) {
+		t.Errorf("outbox = %v, quería %v", got, want)
+	}
+}
+
+func TestReactivateRefusesWithoutChangingAnything(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, db *sql.DB)
+		want  error
+	}{
+		{"usuario inexistente", func(*testing.T, *sql.DB) {}, repository.ErrUserNotFound},
+		{"usuario sin registro todavía", func(t *testing.T, db *sql.DB) {
+			seed(t, db, []seedUser{{n: 7, name: "Fantasma", registeredDaysAfter: -1}})
+		}, repository.ErrUserNotFound},
+		{"usuario activo", func(t *testing.T, db *sql.DB) {
+			seed(t, db, []seedUser{{n: 7, name: "Activo", email: "a@example.com", registeredDaysAfter: 0}})
+		}, repository.ErrNotSuspended},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, db := newSuspensionRepo(t)
+			tc.setup(t, db)
+			u, err := repo.Reactivate(context.Background(), uid(7), eventFor("admin.user_reactivated"))
+			if !errors.Is(err, tc.want) || u != nil {
+				t.Fatalf("u=%+v err=%v, quería %v", u, err, tc.want)
+			}
+			if got := outboxRows(t, db); len(got) != 0 {
+				t.Errorf("no debe escribirse ningún evento: %v", got)
+			}
+		})
+	}
+}
+
+func TestReactivateRollsBackWhenTheEventCannotBeStored(t *testing.T) {
+	repo, db := newSuspensionRepo(t)
+	seed(t, db, []seedUser{{n: 1, name: "Ale", email: "ale@example.com", registeredDaysAfter: 0, suspended: true}})
+
+	_, err := repo.Reactivate(context.Background(), uid(1), func(int64) (string, any) {
+		return "admin.user_reactivated", make(chan int) // no serializable a JSON
+	})
+	if err == nil {
+		t.Fatal("esperaba un error")
+	}
+	var status string
+	if err := db.QueryRow(`SELECT status FROM users WHERE user_id = $1`, uid(1)).Scan(&status); err != nil || status != "suspended" {
+		t.Errorf("status = %q (err %v): la reactivación debe deshacerse", status, err)
+	}
+}
+
+func TestConcurrentReactivationsOnlyOneWins(t *testing.T) {
+	repo, db := newSuspensionRepo(t)
+	seed(t, db, []seedUser{{n: 1, name: "Ale", email: "ale@example.com", registeredDaysAfter: 0, suspended: true}})
+
+	const racers = 8
+	errs := make([]error, racers)
+	var wg sync.WaitGroup
+	for i := range racers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = repo.Reactivate(context.Background(), uid(1), eventFor("admin.user_reactivated"))
+		}()
+	}
+	wg.Wait()
+
+	ok, notSuspended := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case errors.Is(err, repository.ErrNotSuspended):
+			notSuspended++
+		default:
+			t.Errorf("error inesperado: %v", err)
+		}
+	}
+	if ok != 1 || notSuspended != racers-1 {
+		t.Errorf("ok=%d no_suspendido=%d, quería 1 y %d", ok, notSuspended, racers-1)
+	}
+	if got := outboxRows(t, db); len(got) != 1 {
+		t.Errorf("outbox = %v, quería exactamente un evento", got)
+	}
+}
+
+func TestListSuspendedReturnsOnlySuspendedWithCurrentVersion(t *testing.T) {
+	repo, db := newSuspensionRepo(t)
+	seed(t, db, []seedUser{
+		{n: 1, name: "Activo", email: "a@example.com", registeredDaysAfter: 0},
+		{n: 2, name: "Suspendido", email: "s@example.com", registeredDaysAfter: 1},
+		{n: 3, name: "Suspendido dos veces", email: "d@example.com", registeredDaysAfter: 2},
+	})
+	ctx := context.Background()
+	if got, err := repo.ListSuspended(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("sin suspendidos: %v err=%v", got, err)
+	}
+
+	if _, err := repo.Suspend(ctx, uid(3), uid(99), suspendedAt, eventFor("admin.user_suspended")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Reactivate(ctx, uid(3), eventFor("admin.user_reactivated")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Suspend(ctx, uid(3), uid(99), suspendedAt.Add(time.Hour), eventFor("admin.user_suspended")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Suspend(ctx, uid(2), uid(99), suspendedAt, eventFor("admin.user_suspended")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.ListSuspended(ctx)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("suspendidos: %+v err=%v", got, err)
+	}
+	if got[0].UserID != uid(2) || got[0].Version != 1 || !got[0].SuspendedAt.Equal(suspendedAt) {
+		t.Errorf("primero: %+v", got[0])
+	}
+	if got[1].UserID != uid(3) || got[1].Version != 3 || !got[1].SuspendedAt.Equal(suspendedAt.Add(time.Hour)) {
+		t.Errorf("segundo (suspendido dos veces, versión 3): %+v", got[1])
+	}
+}

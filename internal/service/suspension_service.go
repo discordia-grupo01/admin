@@ -17,6 +17,7 @@ var (
 	ErrUserNotFound         = repository.ErrUserNotFound
 	ErrCannotSuspendStaff   = repository.ErrTargetIsStaff
 	ErrUserAlreadySuspended = repository.ErrAlreadySuspended
+	ErrUserNotSuspended     = repository.ErrNotSuspended
 )
 
 type SuspensionService struct {
@@ -62,4 +63,60 @@ func (s *SuspensionService) Suspend(ctx context.Context, userID, staffID string)
 		return nil, fmt.Errorf("suspender usuario: %w", err)
 	}
 	return u, nil
+}
+
+// Reactivate levanta la suspensión de userID y deja escrito en el outbox el
+// evento admin.user_reactivated, firmado. Su version es la siguiente a la de la
+// suspensión, así que los consumidores lo aplican por encima de ella.
+func (s *SuspensionService) Reactivate(ctx context.Context, userID string) (*model.User, error) {
+	parsed, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, ErrUserNotFound
+	}
+	userID = parsed.String()
+
+	at := s.now().UTC().Truncate(time.Microsecond)
+	u, err := s.repo.Reactivate(ctx, userID, func(version int64) (string, any) {
+		e := admin.UserReactivated{
+			Meta:    envelope.Meta{EventID: s.newEventID(), OccurredAt: at},
+			UserID:  userID,
+			Version: version,
+		}
+		e.Sign(s.hmacSecret)
+		return admin.RoutingKeyUserReactivated, e
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reactivar usuario: %w", err)
+	}
+	return u, nil
+}
+
+// EventPublisher publica un evento en el bus.
+type EventPublisher interface {
+	Publish(ctx context.Context, routingKey string, payload any) error
+}
+
+// RepublishSuspensions vuelve a publicar un admin.user_suspended por cada
+// usuario suspendido, con la version vigente, para que un consumidor nuevo (que
+// no estaba cuando se suspendió) se ponga al día. Cada evento lleva un event_id
+// nuevo y firma propia; occurred_at es la fecha real de la suspensión. Es
+// seguro repetirlo: los consumidores ignoran lo que ya aplicaron por version.
+// Corta en el primer error de publicación y devuelve cuántos alcanzó a publicar.
+func (s *SuspensionService) RepublishSuspensions(ctx context.Context, pub EventPublisher) (int, error) {
+	suspended, err := s.repo.ListSuspended(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("listar suspendidos: %w", err)
+	}
+	for i, u := range suspended {
+		e := admin.UserSuspended{
+			Meta:    envelope.Meta{EventID: s.newEventID(), OccurredAt: u.SuspendedAt.UTC()},
+			UserID:  u.UserID,
+			Version: u.Version,
+		}
+		e.Sign(s.hmacSecret)
+		if err := pub.Publish(ctx, admin.RoutingKeyUserSuspended, e); err != nil {
+			return i, fmt.Errorf("publicar la suspensión de %s: %w", u.UserID, err)
+		}
+	}
+	return len(suspended), nil
 }
