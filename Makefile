@@ -1,4 +1,4 @@
-.PHONY: run test test-integration build migrate seed-staff
+.PHONY: run test test-integration build migrate seed-staff republish-suspensions
 
 -include .env
 export
@@ -34,6 +34,11 @@ migrate:
 seed-staff:
 	@test -n "$(EMAIL)" || (echo "falta EMAIL: make seed-staff EMAIL=manu@example.com" >&2; exit 1)
 	go run ./cmd/seedstaff --email "$(EMAIL)"
+
+# Vuelve a publicar un admin.user_suspended por cada suspendido, para poner al
+# día a un consumidor nuevo. Uso: make republish-suspensions [ARGS=--dry-run]
+republish-suspensions:
+	go run ./cmd/republishsuspensions $(ARGS)
 
 # Corre también los tests de integración contra el Postgres y el RabbitMQ de
 # docker-compose (`docker compose up -d db rabbitmq`). Usa una base aparte,

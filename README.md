@@ -39,6 +39,16 @@ El rol de staff no se puede auto-asignar desde la API: se otorga por fuera, de d
 
 Para quitarle el rol a alguien: borrar su fila de `staff_members` y sacarlo de `STAFF_USER_IDS` (si no, se vuelve a sembrar al arrancar).
 
+## Poner al día a un consumidor nuevo
+RabbitMQ no guarda los eventos publicados antes de que exista la cola de un consumidor. Si identify, servers, messaging o voz se despliegan (o se reinician con la cola vacía) después de que ya había usuarios suspendidos, no se enteran de ellos. Para ponerlos al día:
+
+```bash
+make republish-suspensions ARGS=--dry-run   # cuenta las suspensiones vigentes, sin publicar
+make republish-suspensions                  # publica un admin.user_suspended por cada suspendido
+```
+
+Cada evento sale con la `version` vigente del usuario, un `event_id` nuevo y su propia firma. Es seguro repetirlo: los consumidores ignoran lo que ya aplicaron. Publica directo al broker (no pasa por el outbox), usa `DATABASE_*`, `RABBITMQ_URL` y `ADMIN_EVENTS_HMAC_SECRET`, y si RabbitMQ no responde falla con un error. Hay que correrlo una vez por cada consumidor nuevo.
+
 ## Variables de entorno
 | Variable | Default | Descripción |
 |---|---|---|
@@ -65,7 +75,8 @@ Para quitarle el rol a alguien: borrar su fila de `staff_members` y sacarlo de `
 discordia-admin/
 ├── cmd/
 │   ├── api/main.go          arranque: config, base, consumers, outbox, router y apagado ordenado
-│   └── seedstaff/main.go    herramienta: da de alta staff por email
+│   ├── seedstaff/main.go    herramienta: da de alta staff por email
+│   └── republishsuspensions/main.go  herramienta: re-publica las suspensiones vigentes
 ├── internal/
 │   ├── config/              carga y validación del entorno
 │   ├── apierr/              formato de error {error:{code,message,details}}
@@ -91,6 +102,7 @@ discordia-admin/
 - `make build` - compila el binario en `bin/api`.
 - `make migrate` - aplica las migraciones pendientes (lee la conexión de `.env`).
 - `make seed-staff EMAIL=<email>` - da de alta como staff al usuario con ese email.
+- `make republish-suspensions [ARGS=--dry-run]` - vuelve a publicar las suspensiones vigentes para un consumidor nuevo.
 
 ## Tests
 Cobertura mínima: 70 % (requisito del proyecto). El CI la verifica en cada PR, con Postgres y RabbitMQ de servicio.
