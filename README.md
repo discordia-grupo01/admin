@@ -123,6 +123,41 @@ Esquemas en [`discordia-docs`](https://github.com/discordia-grupo01/docs) (`asyn
 
 Hasta que identify publique `users.account_registered` y servers publique `servers.server_updated`, las tablas de usuarios y servidores solo se llenan en los tests.
 
+## Deploy
+
+Cada push a `main` ejecuta `.github/workflows/deploy.yml` (también se puede lanzar a mano con *Run workflow*). Tiene dos jobs encadenados: si falla `migrate`, no se despliega.
+
+1. **`migrate`**: aplica las migraciones pendientes sobre la base de Supabase con `make migrate` (golang-migrate corre solo las que faltan según `schema_migrations`). Falla con un mensaje claro si falta algún secret.
+2. **`deploy`**: entra por SSH a la VM de Oracle, actualiza el repo en `~/discordia/admin` y reconstruye el contenedor con `docker-compose.prod.yml`. Hace un smoke test de `/livez`.
+
+`docker-compose.prod.yml` levanta solo la API: la base es Supabase y RabbitMQ es el compartido del equipo (por Tailscale). Las variables salen del `.env` que vive en la VM, en `~/discordia/admin/.env`, y no se versiona.
+
+### Secrets del repositorio (GitHub → Settings → Secrets)
+
+| Secret | Valor |
+|---|---|
+| `ADMIN_VM_HOST` | IP o nombre de la VM de Oracle donde corre admin. |
+| `ADMIN_VM_USER` | Usuario SSH de esa VM. |
+| `ADMIN_VM_SSH_KEY` | Clave privada con la que el pipeline entra por SSH. |
+| `ADMIN_VM_HOST_KEY` | Línea de `known_hosts` de la VM (`ssh-keyscan -t ed25519 <host>`), para verificar que se conecta a la VM correcta. |
+| `PROD_DATABASE_HOST` | Host del Session pooler de Supabase. |
+| `PROD_DATABASE_PORT` | `5432`. |
+| `PROD_DATABASE_NAME` | `postgres`. |
+| `PROD_DATABASE_USER` | `postgres.<project-ref>`. |
+| `PROD_DATABASE_PASSWORD` | Password de la base. |
+| `PROD_DATABASE_SSLMODE` | `require`. |
+| `PROD_DATABASE_SCHEMA` | Opcional. Sin cargar, las tablas van al schema `public`, que alcanza porque la base es solo de admin. Cargar `admin` solo si se comparte la base con otro servicio (identify también tiene tablas `users`, `consumed_events` y `outbox_events`). |
+
+Los carga el equipo; no se versionan.
+
+### Variables de la VM (`~/discordia/admin/.env`)
+
+Las de la sección "Variables de entorno": `ENVIRONMENT=production`, `DATABASE_*` con `DATABASE_SSLMODE=require` (sin `DATABASE_SCHEMA`), `JWT_SECRET` (el mismo que identify), `RABBITMQ_URL`, `ADMIN_EVENTS_HMAC_SECRET` (el mismo que usan los demás servicios) y `STAFF_USER_IDS`. La VM tiene que estar en la red de Tailscale para que Kong llegue a `http://<ip-tailscale>:8080`: esa dirección es `ADMIN_UPSTREAM_URL` en `discordia-gateway`.
+
+### Primer despliegue
+
+Desplegar admin primero, con sus consumidores ya enlazados al exchange, y recién después volver a lanzar los backfills de identify y servers: RabbitMQ no guarda lo publicado antes de que exista la cola, y sin ese orden los listados de usuarios y servidores salen vacíos. Si algún consumidor (identify, servers, messaging, voz) se despliega después de que ya hubiera suspendidos, correr `make republish-suspensions` (ver "Poner al día a un consumidor nuevo").
+
 ## Health checks
 - `GET /livez` - el proceso está vivo. No consulta dependencias.
 - `GET /readyz` - Postgres y RabbitMQ responden. Devuelve 503 con los nombres de las que fallan.

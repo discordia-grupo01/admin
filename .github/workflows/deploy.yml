@@ -14,7 +14,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Aplica las migraciones pendientes contra la base de produccion (Supabase)
+  # con `make migrate`: golang-migrate corre solo las que faltan segun la tabla
+  # schema_migrations. Va antes del deploy: el codigo nuevo arranca con el schema
+  # ya actualizado, y si una migracion falla no se despliega.
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Aplicar migraciones en produccion
+        env:
+          DATABASE_HOST: ${{ secrets.PROD_DATABASE_HOST }}
+          DATABASE_PORT: ${{ secrets.PROD_DATABASE_PORT }}
+          DATABASE_NAME: ${{ secrets.PROD_DATABASE_NAME }}
+          DATABASE_USER: ${{ secrets.PROD_DATABASE_USER }}
+          DATABASE_PASSWORD: ${{ secrets.PROD_DATABASE_PASSWORD }}
+          DATABASE_SSLMODE: ${{ secrets.PROD_DATABASE_SSLMODE }}
+          # Opcional: vacio = schema public (la base es solo de admin).
+          DATABASE_SCHEMA: ${{ secrets.PROD_DATABASE_SCHEMA }}
+        run: |
+          for v in DATABASE_HOST DATABASE_PORT DATABASE_NAME DATABASE_USER DATABASE_PASSWORD DATABASE_SSLMODE; do
+            if [ -z "${!v}" ]; then
+              echo "Falta el secret PROD_$v (ver README, seccion Deploy)" >&2
+              exit 1
+            fi
+          done
+          # La password va dentro de la URL de conexion que arma `make migrate`:
+          # se codifica por si tiene caracteres especiales (@, :, /, #...) y se
+          # enmascara, porque codificada ya no coincide con el secret y GitHub no
+          # la ocultaria. `make -s` para que make no imprima el comando (con la URL).
+          ENCODED=$(jq -rn --arg p "$DATABASE_PASSWORD" '$p|@uri')
+          echo "::add-mask::$ENCODED"
+          DATABASE_PASSWORD="$ENCODED" make -s migrate
+
+  # Espera a `migrate`: no se despliega sin el schema al dia.
   deploy:
+    needs: migrate
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
