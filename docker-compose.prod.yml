@@ -1,0 +1,12 @@
+# Producción (VM de Oracle). Solo la API: la base es Supabase y RabbitMQ es
+# el compartido del equipo (por Tailscale). Las variables salen de .env, que
+# vive en la VM y no se versiona.
+name: discordia-admin
+
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8080:8080"

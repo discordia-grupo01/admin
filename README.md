@@ -2,7 +2,7 @@
 
 Servicio de **Administración** de Discordia: la API del backoffice para el staff de la plataforma. Cubre las historias #29 (suspender usuario), #30 (reactivar usuario), #31 (listado de usuarios con filtros) y #32 (listado de servidores).
 
-> **Estado**: la base del servicio está lista (configuración, autenticación de staff, outbox, RabbitMQ, `/livez` y `/readyz`). Los endpoints de `/v1/admin` están definidos en [`openapi.yaml`](openapi.yaml) y se implementan en las ramas de cada historia.
+> **Estado**: implementados los cuatro endpoints de las historias (#29 a #32), la base del servicio (configuración, autenticación de staff, outbox, RabbitMQ, `/livez` y `/readyz`) y el alta de staff. Ver [`openapi.yaml`](openapi.yaml).
 
 ## Stack
 - Lenguaje: Go
@@ -27,7 +27,27 @@ make run
 
 Postgres queda en `localhost:5433` (no 5432, para no chocar con otros servicios) y la consola de RabbitMQ en http://localhost:15672 (guest / guest).
 
-Para entrar como staff, poner en `STAFF_USER_IDS` el UUID de un usuario registrado en identify.
+## Dar de alta al staff
+El rol de staff no se puede auto-asignar desde la API: se otorga por fuera, de dos maneras.
+
+- **Por UUID**: poner el UUID del usuario (de identify) en `STAFF_USER_IDS`. Se siembra en cada arranque (es idempotente).
+- **Por email**: si el usuario ya está en la réplica de admin (se registró en identify y su alta llegó por `users.account_registered`):
+  ```bash
+  make seed-staff EMAIL=manu@example.com
+  ```
+  Usa la misma conexión `DATABASE_*` que el servicio y no necesita `JWT_SECRET` ni RabbitMQ. Es idempotente.
+
+Para quitarle el rol a alguien: borrar su fila de `staff_members` y sacarlo de `STAFF_USER_IDS` (si no, se vuelve a sembrar al arrancar).
+
+## Poner al día a un consumidor nuevo
+RabbitMQ no guarda los eventos publicados antes de que exista la cola de un consumidor. Si identify, servers, messaging o voz se despliegan (o se reinician con la cola vacía) después de que ya había usuarios suspendidos, no se enteran de ellos. Para ponerlos al día:
+
+```bash
+make republish-suspensions ARGS=--dry-run   # cuenta las suspensiones vigentes, sin publicar
+make republish-suspensions                  # publica un admin.user_suspended por cada suspendido
+```
+
+Cada evento sale con la `version` vigente del usuario, un `event_id` nuevo y su propia firma. Es seguro repetirlo: los consumidores ignoran lo que ya aplicaron. Publica directo al broker (no pasa por el outbox), usa `DATABASE_*`, `RABBITMQ_URL` y `ADMIN_EVENTS_HMAC_SECRET`, y si RabbitMQ no responde falla con un error. Hay que correrlo una vez por cada consumidor nuevo.
 
 ## Variables de entorno
 | Variable | Default | Descripción |
@@ -53,12 +73,15 @@ Para entrar como staff, poner en `STAFF_USER_IDS` el UUID de un usuario registra
 ## Estructura de carpetas
 ```
 discordia-admin/
-├── cmd/api/main.go          arranque: config, base, outbox, router y apagado ordenado
+├── cmd/
+│   ├── api/main.go          arranque: config, base, consumers, outbox, router y apagado ordenado
+│   ├── seedstaff/main.go    herramienta: da de alta staff por email
+│   └── republishsuspensions/main.go  herramienta: re-publica las suspensiones vigentes
 ├── internal/
 │   ├── config/              carga y validación del entorno
 │   ├── apierr/              formato de error {error:{code,message,details}}
 │   ├── middleware/          autenticación (JWT) y autorización (staff)
-│   ├── handler/             router y handlers HTTP (health)
+│   ├── handler/             router y handlers HTTP (health, usuarios, servidores, suspensión)
 │   ├── service/             lógica de negocio
 │   ├── repository/          acceso a PostgreSQL
 │   ├── audit/               registro de eventos consumidos
@@ -78,6 +101,8 @@ discordia-admin/
 - `make test-integration` - además corre los tests de integración contra el Postgres y el RabbitMQ de docker-compose (usa una base aparte, `discordia_admin_test`, porque esos tests vacían tablas).
 - `make build` - compila el binario en `bin/api`.
 - `make migrate` - aplica las migraciones pendientes (lee la conexión de `.env`).
+- `make seed-staff EMAIL=<email>` - da de alta como staff al usuario con ese email.
+- `make republish-suspensions [ARGS=--dry-run]` - vuelve a publicar las suspensiones vigentes para un consumidor nuevo.
 
 ## Tests
 Cobertura mínima: 70 % (requisito del proyecto). El CI la verifica en cada PR, con Postgres y RabbitMQ de servicio.
@@ -86,7 +111,17 @@ Cobertura mínima: 70 % (requisito del proyecto). El CI la verifica en cada PR, 
 Ver [`openapi.yaml`](openapi.yaml).
 
 ## Eventos
-Se agregan junto con cada historia: `admin.user_suspended` y `admin.user_reactivated` (publica, firmados con HMAC), y los de `users.*` y `servers.*` que consume para armar sus listados.
+Esquemas en [`discordia-docs`](https://github.com/discordia-grupo01/docs) (`asyncapi/`) y tipos en [`events-contract`](https://github.com/discordia-grupo01/events-contract).
+
+**Consume** (cola `admin.users`, ack manual): `users.account_registered` y `users.profile_updated`. Alimentan la réplica de usuarios del listado. Son idempotentes y toleran desorden: el perfil se aplica solo si su `version` es mayor a la guardada, y un usuario no aparece hasta que llega su alta. Los mensajes inválidos (JSON roto, id que no es UUID, etc.) se descartan y quedan en `consumed_events`; las fallas de base se reencolan.
+
+**Publica** (outbox → `discordia.events`): `admin.user_suspended`, con `user_id` y `version`, sin motivo ni email. Se escribe en `outbox_events` en la misma transacción que el cambio de estado, así que una caída de RabbitMQ lo demora pero no lo pierde. Lleva una firma HMAC-SHA256 (`ADMIN_EVENTS_HMAC_SECRET`, helper `Sign`/`Verify` de `events-contract`) que cada consumidor tiene que verificar antes de aplicarlo; `version` sube con cada suspensión o reactivación del usuario y los consumidores ignoran las que no son mayores a la que ya tienen. `DELETE /v1/admin/users/{id}/suspension` publica `admin.user_reactivated` con el mismo esquema (y la `version` siguiente); la firma incluye la routing key, así que un evento de suspensión no puede reenviarse como reactivación.
+
+**Consistencia eventual**: `POST /v1/admin/users/{id}/suspension` suspende al usuario en admin al instante, pero identify, servers, messaging y voz lo bloquean recién cuando procesan el evento (normalmente menos de un segundo); con `DELETE`, igual al revés. Por esa ventana el usuario podría operar unos instantes; no se hace ninguna llamada síncrona para cerrarla.
+
+**Consume** (cola `admin.servers`, ack manual): `servers.server_updated`, `servers.server_deleted`, `servers.member_joined` y `servers.member_left`. Alimentan la réplica de servidores del listado. Ninguno trae versión, así que se ordenan por `occurred_at`: gana la foto de servidor más nueva y, por cada par servidor-usuario, el último evento de membresía. `server_deleted` deja el servidor marcado como borrado (un `server_updated` tardío no lo resucita) y descarta sus membresías. Un servidor no aparece hasta que llega su `server_updated`. Los mensajes inválidos se descartan y quedan en `consumed_events`; las fallas de base se reencolan.
+
+Hasta que identify publique `users.account_registered` y servers publique `servers.server_updated`, las tablas de usuarios y servidores solo se llenan en los tests.
 
 ## Health checks
 - `GET /livez` - el proceso está vivo. No consulta dependencias.

@@ -7,10 +7,9 @@ info:
     `/v1/admin/*` requieren `Authorization: Bearer <JWT>` de un usuario que sea
     staff de la plataforma.
 
-    **Estado**: `/livez` y `/readyz` están implementados. Los endpoints de
-    `/v1/admin` son el contrato acordado y se implementan en las ramas de cada
-    historia (#29 suspender, #30 reactivar, #31 listado de usuarios, #32
-    listado de servidores).
+    **Estado**: implementados todos los endpoints: `/livez`, `/readyz`,
+    `GET /v1/admin/users` (#31), `GET /v1/admin/servers` (#32) y
+    `POST` / `DELETE /v1/admin/users/{id}/suspension` (#29 y #30).
 
     **Consistencia eventual**: suspender o reactivar cambia el estado en admin
     al instante y publica un evento; los demás servicios lo aplican a los pocos
@@ -76,8 +75,8 @@ paths:
       parameters:
         - name: search
           in: query
-          schema: { type: string }
-          description: Texto a buscar en el email o el nombre.
+          schema: { type: string, maxLength: 100 }
+          description: Texto a buscar en el email o el nombre. Los caracteres `%`, `_` y `\` se toman como texto literal.
         - name: status
           in: query
           schema: { $ref: "#/components/schemas/UserStatus" }
@@ -102,9 +101,12 @@ paths:
       tags: [Users]
       summary: Suspender a un usuario (HU #29)
       description: |
-        Impide que el usuario inicie sesión y use la plataforma. Publica
-        `admin.user_suspended`. No se puede suspender a un miembro del staff
-        (incluido uno mismo).
+        Impide que el usuario inicie sesión y use la plataforma. El estado
+        cambia en admin al instante y, en la misma transacción, queda escrito
+        el evento `admin.user_suspended` (firmado con HMAC) para que lo publique
+        el outbox; los demás servicios lo aplican a los pocos instantes. No se
+        puede suspender a un miembro del staff (incluido uno mismo). Un `{id}`
+        que no es un UUID se trata como usuario inexistente.
       responses:
         "200":
           description: Usuario suspendido
@@ -130,7 +132,12 @@ paths:
     delete:
       tags: [Users]
       summary: Reactivar a un usuario suspendido (HU #30)
-      description: Levanta la suspensión. Publica `admin.user_reactivated`.
+      description: |
+        Levanta la suspensión: el usuario vuelve a estar activo en admin al
+        instante y, en la misma transacción, queda escrito el evento
+        `admin.user_reactivated` (firmado con HMAC) para que lo publique el
+        outbox. Los demás servicios dejan de bloquear al usuario al procesarlo.
+        Un `{id}` que no es un UUID se trata como usuario inexistente.
       responses:
         "200":
           description: Usuario reactivado
@@ -153,12 +160,14 @@ paths:
     get:
       tags: [Servers]
       summary: Listar los servidores de la plataforma (HU #32)
-      description: Lista paginada, ordenada por fecha de creación descendente.
+      description: |
+        Lista paginada, ordenada por fecha de creación descendente. Un servidor
+        aparece cuando llega su alta a la réplica y desaparece cuando se elimina.
       parameters:
         - name: search
           in: query
-          schema: { type: string }
-          description: Texto a buscar en el nombre del servidor.
+          schema: { type: string, maxLength: 100 }
+          description: Texto a buscar en el nombre del servidor (parcial, sin distinguir mayúsculas). Los caracteres `%`, `_` y `\` se toman como texto literal.
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
       responses:
