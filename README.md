@@ -141,12 +141,12 @@ Cada push a `main` ejecuta `.github/workflows/deploy.yml` (también se puede lan
 | `ADMIN_VM_SSH_KEY` | Clave privada con la que el pipeline entra por SSH. |
 | `ADMIN_VM_HOST_KEY` | Línea de `known_hosts` de la VM (`ssh-keyscan -t ed25519 <host>`), para verificar que se conecta a la VM correcta. |
 | `PROD_DATABASE_HOST` | Host del Session pooler de Supabase. |
-| `PROD_DATABASE_PORT` | `5432`. |
-| `PROD_DATABASE_NAME` | `postgres`. |
-| `PROD_DATABASE_USER` | `postgres.<project-ref>`. |
-| `PROD_DATABASE_PASSWORD` | Password de la base. |
-| `PROD_DATABASE_SSLMODE` | `require`. |
-| `PROD_DATABASE_SCHEMA` | Opcional. Sin cargar, las tablas van al schema `public`, que alcanza porque la base es solo de admin. Cargar `admin` solo si se comparte la base con otro servicio (identify también tiene tablas `users`, `consumed_events` y `outbox_events`). |
+| `DATABASE_PORT` | `5432`. |
+| `DATABASE_NAME` | `postgres`. |
+| `DATABASE_USER` | `postgres.<project-ref>`. |
+| `DATABASE_PASSWORD` | Password de la base. |
+| `DATABASE_SSLMODE` | `require`. |
+| `DATABASE_SCHEMA` | Opcional. Sin cargar, las tablas van al schema `public`, que alcanza porque la base es solo de admin. Cargar `admin` solo si se comparte la base con otro servicio (identify también tiene tablas `users`, `consumed_events` y `outbox_events`). |
 
 Los carga el equipo; no se versionan.
 

@@ -30,18 +30,21 @@ jobs:
           go-version: "1.22"
       - name: Aplicar migraciones en produccion
         env:
+          # El host se llama PROD_DATABASE_HOST; el resto de los secrets de la
+          # base se llaman igual que la variable (DATABASE_PORT, DATABASE_NAME...).
           DATABASE_HOST: ${{ secrets.PROD_DATABASE_HOST }}
-          DATABASE_PORT: ${{ secrets.PROD_DATABASE_PORT }}
-          DATABASE_NAME: ${{ secrets.PROD_DATABASE_NAME }}
-          DATABASE_USER: ${{ secrets.PROD_DATABASE_USER }}
-          DATABASE_PASSWORD: ${{ secrets.PROD_DATABASE_PASSWORD }}
-          DATABASE_SSLMODE: ${{ secrets.PROD_DATABASE_SSLMODE }}
+          DATABASE_PORT: ${{ secrets.DATABASE_PORT }}
+          DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
+          DATABASE_USER: ${{ secrets.DATABASE_USER }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          DATABASE_SSLMODE: ${{ secrets.DATABASE_SSLMODE }}
           # Opcional: vacio = schema public (la base es solo de admin).
-          DATABASE_SCHEMA: ${{ secrets.PROD_DATABASE_SCHEMA }}
+          DATABASE_SCHEMA: ${{ secrets.DATABASE_SCHEMA }}
         run: |
           for v in DATABASE_HOST DATABASE_PORT DATABASE_NAME DATABASE_USER DATABASE_PASSWORD DATABASE_SSLMODE; do
             if [ -z "${!v}" ]; then
-              echo "Falta el secret PROD_$v (ver README, seccion Deploy)" >&2
+              SECRET="$v"; [ "$v" = "DATABASE_HOST" ] && SECRET="PROD_DATABASE_HOST"
+              echo "Falta el secret $SECRET (ver README, seccion Deploy)" >&2
               exit 1
             fi
           done
