@@ -25,6 +25,9 @@ type seedUser struct {
 	suspended           bool
 }
 
+// seed siembra usuarios con el email verificado; markPending deja sin
+// verificar a los que se le pasen.
+
 func seed(t *testing.T, db *sql.DB, users []seedUser) {
 	t.Helper()
 	for _, u := range users {
@@ -37,10 +40,19 @@ func seed(t *testing.T, db *sql.DB, users []seedUser) {
 			status, suspendedAt = "suspended", base.AddDate(0, 1, 0)
 		}
 		if _, err := db.Exec(`
-			INSERT INTO users (user_id, name, email, registered_at, status, suspended_at)
-			VALUES ($1, $2, $3, $4, $5, $6)`,
+			INSERT INTO users (user_id, name, email, registered_at, status, suspended_at, email_verified)
+			VALUES ($1, $2, $3, $4, $5, $6, TRUE)`,
 			uid(u.n), u.name, u.email, registered, status, suspendedAt); err != nil {
 			t.Fatalf("sembrar %s: %v", u.name, err)
+		}
+	}
+}
+
+func markPending(t *testing.T, db *sql.DB, ns ...int) {
+	t.Helper()
+	for _, n := range ns {
+		if _, err := db.Exec(`UPDATE users SET email_verified = FALSE WHERE user_id = $1`, uid(n)); err != nil {
+			t.Fatalf("dejar pendiente a %d: %v", n, err)
 		}
 	}
 }
@@ -191,6 +203,50 @@ func TestUserListFilterByStatus(t *testing.T) {
 	}
 }
 
+// Un usuario que no confirmó su email está pendiente, salvo que esté
+// suspendido: la suspensión manda.
+func TestUserListPendingStatus(t *testing.T) {
+	repo, db := newUserRepo(t)
+	seed(t, db, []seedUser{
+		{1, "Ana", "ana@example.com", 0, false},
+		{2, "Beto", "beto@example.com", 1, false},
+		{3, "Caro", "caro@example.com", 2, true},
+		{4, "Dani", "dani@example.com", 3, false},
+	})
+	markPending(t, db, 2, 3)
+	ctx := context.Background()
+
+	all := listAll(t, repo)
+	got := map[string]model.UserStatus{}
+	for _, u := range all {
+		got[u.ID] = u.Status
+	}
+	want := map[string]model.UserStatus{
+		uid(1): model.UserStatusActive,
+		uid(2): model.UserStatusPending,
+		uid(3): model.UserStatusSuspended,
+		uid(4): model.UserStatusActive,
+	}
+	for id, s := range want {
+		if got[id] != s {
+			t.Errorf("%s: estado %q, quería %q", id, got[id], s)
+		}
+	}
+
+	pending, total, err := repo.List(ctx, repository.UserFilter{Status: model.UserStatusPending}, 20, 0)
+	if err != nil || total != 1 || !equal(ids(pending), []string{uid(2)}) {
+		t.Errorf("pending: total=%d %v err=%v", total, ids(pending), err)
+	}
+	active, total, err := repo.List(ctx, repository.UserFilter{Status: model.UserStatusActive}, 20, 0)
+	if err != nil || total != 2 || !equal(ids(active), []string{uid(4), uid(1)}) {
+		t.Errorf("active no debe incluir pendientes: total=%d %v err=%v", total, ids(active), err)
+	}
+	suspended, total, err := repo.List(ctx, repository.UserFilter{Status: model.UserStatusSuspended}, 20, 0)
+	if err != nil || total != 1 || !equal(ids(suspended), []string{uid(3)}) {
+		t.Errorf("suspended incluye al suspendido sin verificar: total=%d %v err=%v", total, ids(suspended), err)
+	}
+}
+
 func TestUserListPagination(t *testing.T) {
 	repo, db := newUserRepo(t)
 	var users []seedUser
@@ -228,7 +284,7 @@ func listAll(t *testing.T, repo repository.UserRepository) []model.User {
 func TestUpsertRegistrationAddsTheUserToTheListing(t *testing.T) {
 	repo, _ := newUserRepo(t)
 	ctx := context.Background()
-	reg := repository.Registration{UserID: uid(1), Email: "manu@example.com", Name: "Manu", RegisteredAt: base}
+	reg := repository.Registration{UserID: uid(1), Email: "manu@example.com", Name: "Manu", RegisteredAt: base, EmailVerified: true}
 
 	if err := repo.UpsertRegistration(ctx, reg); err != nil {
 		t.Fatal(err)
@@ -242,6 +298,65 @@ func TestUpsertRegistrationAddsTheUserToTheListing(t *testing.T) {
 	if len(users) != 1 || users[0].ID != uid(1) || users[0].Email != "manu@example.com" || users[0].Name != "Manu" ||
 		users[0].Status != model.UserStatusActive || !users[0].CreatedAt.Equal(base) {
 		t.Fatalf("listado: %+v", users)
+	}
+}
+
+// Un alta con email sin verificar aparece como pendiente hasta que llega
+// users.email_verified.
+func TestRegistrationPendingUntilEmailVerified(t *testing.T) {
+	repo, _ := newUserRepo(t)
+	ctx := context.Background()
+	if err := repo.UpsertRegistration(ctx, repository.Registration{UserID: uid(1), Email: "a@example.com", Name: "A", RegisteredAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	if users := listAll(t, repo); len(users) != 1 || users[0].Status != model.UserStatusPending {
+		t.Fatalf("sin verificar debe estar pendiente: %+v", users)
+	}
+
+	// Repetido (at-least-once) deja lo mismo.
+	for i := 0; i < 2; i++ {
+		if err := repo.MarkEmailVerified(ctx, uid(1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if users := listAll(t, repo); len(users) != 1 || users[0].Status != model.UserStatusActive {
+		t.Fatalf("verificado debe estar activo: %+v", users)
+	}
+}
+
+// La verificación puede llegar antes que el alta, y un alta posterior (o un
+// backfill) con email_verified = false no la deshace.
+func TestEmailVerifiedBeforeRegistration(t *testing.T) {
+	repo, _ := newUserRepo(t)
+	ctx := context.Background()
+
+	if err := repo.MarkEmailVerified(ctx, uid(1)); err != nil {
+		t.Fatal(err)
+	}
+	if users := listAll(t, repo); len(users) != 0 {
+		t.Fatalf("sin registro no debe aparecer: %+v", users)
+	}
+
+	if err := repo.UpsertRegistration(ctx, repository.Registration{UserID: uid(1), Email: "a@example.com", Name: "A", RegisteredAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	if users := listAll(t, repo); len(users) != 1 || users[0].Status != model.UserStatusActive {
+		t.Fatalf("debe aparecer activo, la verificación ya había llegado: %+v", users)
+	}
+}
+
+// Verificar el email no levanta una suspensión.
+func TestEmailVerifiedDoesNotTouchSuspension(t *testing.T) {
+	repo, db := newUserRepo(t)
+	seed(t, db, []seedUser{{1, "Ana", "ana@example.com", 0, true}})
+	markPending(t, db, 1)
+
+	if err := repo.MarkEmailVerified(context.Background(), uid(1)); err != nil {
+		t.Fatal(err)
+	}
+	users := listAll(t, repo)
+	if len(users) != 1 || users[0].Status != model.UserStatusSuspended || users[0].SuspendedAt == nil {
+		t.Fatalf("la suspensión debe seguir intacta: %+v", users)
 	}
 }
 
@@ -316,6 +431,9 @@ func TestUpsertRejectsInvalidUserID(t *testing.T) {
 	}
 	if err := repo.UpsertProfile(context.Background(), repository.Profile{UserID: "no-es-uuid", Name: "n", Version: 1}); err == nil {
 		t.Error("UpsertProfile debería fallar con un id inválido")
+	}
+	if err := repo.MarkEmailVerified(context.Background(), "no-es-uuid"); err == nil {
+		t.Error("MarkEmailVerified debería fallar con un id inválido")
 	}
 }
 

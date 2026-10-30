@@ -102,7 +102,10 @@ func TestUserEventsFlowThroughRabbitMQ(t *testing.T) {
 	// 2) Mensajes que no se pueden procesar nunca.
 	raw(users.RoutingKeyProfileUpdated, "esto no es json")
 	raw(users.RoutingKeyAccountRegistered, `{"user_id":"no-es-uuid","email":"x@y.z","created_at":"2026-09-26T14:30:00Z"}`)
-	// 3) El alta, repetida (at-least-once).
+	// 3) La verificación del email, también antes del alta.
+	publish(users.RoutingKeyEmailVerified, users.EmailVerified{UserID: id, VerifiedAt: time.Date(2026, 9, 26, 14, 35, 0, 0, time.UTC)})
+	// 4) El alta, repetida (at-least-once), sin email_verified: no pisa la
+	// verificación que ya llegó.
 	registered := users.AccountRegistered{UserID: id, Email: "manu@example.com", Name: "Nombre del registro", CreatedAt: time.Date(2026, 9, 26, 14, 30, 0, 0, time.UTC)}
 	publish(users.RoutingKeyAccountRegistered, registered)
 	publish(users.RoutingKeyAccountRegistered, registered)
@@ -117,7 +120,7 @@ func TestUserEventsFlowThroughRabbitMQ(t *testing.T) {
 	}
 	u := list[0]
 	if u.ID != id || u.Email != "manu@example.com" || u.Status != model.UserStatusActive {
-		t.Errorf("usuario: %+v", u)
+		t.Errorf("usuario: %+v (debe estar activo: la verificación llegó antes que el alta)", u)
 	}
 	if u.Name != "Nombre v3" {
 		t.Errorf("name = %q: debe ganar la versión más nueva del perfil, aunque llegó antes del alta y la v2 llegó tarde", u.Name)

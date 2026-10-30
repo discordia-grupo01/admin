@@ -69,7 +69,7 @@ func (h *UserHandler) List(c *gin.Context) {
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidStatus) {
-			apierr.InvalidQuery(c, "status", "El parámetro status debe ser active o suspended")
+			apierr.InvalidQuery(c, "status", "El parámetro status debe ser active, pending o suspended")
 			return
 		}
 		log.Printf("handler: no se pudo listar usuarios: %v", err)
