@@ -16,6 +16,7 @@ const validID = "7c1e5a3b-9d2f-4b8e-a6c4-3f1e9d7b5a2c"
 type fakeSync struct {
 	registrations []repository.Registration
 	profiles      []repository.Profile
+	verified      []string
 	err           error
 }
 
@@ -26,6 +27,11 @@ func (f *fakeSync) ApplyRegistration(_ context.Context, r repository.Registratio
 
 func (f *fakeSync) ApplyProfile(_ context.Context, p repository.Profile) error {
 	f.profiles = append(f.profiles, p)
+	return f.err
+}
+
+func (f *fakeSync) ApplyEmailVerification(_ context.Context, userID string) error {
+	f.verified = append(f.verified, userID)
 	return f.err
 }
 
@@ -40,7 +46,7 @@ func status(t *testing.T, err error) audit.Status {
 
 func TestAccountRegisteredIsApplied(t *testing.T) {
 	sync := &fakeSync{}
-	body := `{"event_id":"e1","occurred_at":"2026-09-26T14:30:00Z","user_id":"7C1E5A3B-9D2F-4B8E-A6C4-3F1E9D7B5A2C","email":"  manu@example.com ","name":"Manu","created_at":"2026-09-26T11:30:00-03:00"}`
+	body := `{"event_id":"e1","occurred_at":"2026-09-26T14:30:00Z","user_id":"7C1E5A3B-9D2F-4B8E-A6C4-3F1E9D7B5A2C","email":"  manu@example.com ","name":"Manu","created_at":"2026-09-26T11:30:00-03:00","email_verified":true}`
 	if err := NewUserEventsHandler(sync).Handle(context.Background(), users.RoutingKeyAccountRegistered, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
@@ -51,11 +57,35 @@ func TestAccountRegisteredIsApplied(t *testing.T) {
 	if got.UserID != validID {
 		t.Errorf("el id debe quedar en forma canónica (minúsculas): %q", got.UserID)
 	}
-	if got.Email != "manu@example.com" || got.Name != "Manu" {
+	if got.Email != "manu@example.com" || got.Name != "Manu" || !got.EmailVerified {
 		t.Errorf("campos: %+v", got)
 	}
 	if want := time.Date(2026, 9, 26, 14, 30, 0, 0, time.UTC); !got.RegisteredAt.Equal(want) || got.RegisteredAt.Location() != time.UTC {
 		t.Errorf("RegisteredAt = %v, quería %v en UTC", got.RegisteredAt, want)
+	}
+}
+
+// Un alta publicada antes de que existiera email_verified llega sin el campo:
+// queda como no verificada (pendiente hasta users.email_verified).
+func TestAccountRegisteredWithoutEmailVerifiedIsPending(t *testing.T) {
+	sync := &fakeSync{}
+	body := `{"event_id":"e1","occurred_at":"2026-09-26T14:30:00Z","user_id":"` + validID + `","email":"manu@example.com","name":"Manu","created_at":"2026-09-26T14:30:00Z"}`
+	if err := NewUserEventsHandler(sync).Handle(context.Background(), users.RoutingKeyAccountRegistered, []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if len(sync.registrations) != 1 || sync.registrations[0].EmailVerified {
+		t.Errorf("registros aplicados: %+v", sync.registrations)
+	}
+}
+
+func TestEmailVerifiedIsApplied(t *testing.T) {
+	sync := &fakeSync{}
+	body := `{"event_id":"e3","occurred_at":"2026-09-26T14:35:00Z","user_id":"7C1E5A3B-9D2F-4B8E-A6C4-3F1E9D7B5A2C","verified_at":"2026-09-26T14:35:00Z"}`
+	if err := NewUserEventsHandler(sync).Handle(context.Background(), users.RoutingKeyEmailVerified, []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if len(sync.verified) != 1 || sync.verified[0] != validID {
+		t.Errorf("verificaciones aplicadas: %v (el id debe quedar en forma canónica)", sync.verified)
 	}
 }
 
@@ -85,6 +115,9 @@ func TestInvalidEventsAreDiscardedWithoutTouchingTheStore(t *testing.T) {
 		{"perfil: id que no es UUID", users.RoutingKeyProfileUpdated, `{"user_id":"x","version":1,"name":"n"}`, audit.StatusDiscardedInvalid},
 		{"perfil: versión 0", users.RoutingKeyProfileUpdated, `{"user_id":"` + validID + `","version":0,"name":"n"}`, audit.StatusDiscardedInvalid},
 		{"perfil: versión negativa", users.RoutingKeyProfileUpdated, `{"user_id":"` + validID + `","version":-2,"name":"n"}`, audit.StatusDiscardedInvalid},
+		{"email verificado: JSON roto", users.RoutingKeyEmailVerified, `{no es json`, audit.StatusDiscardedMalformed},
+		{"email verificado: id que no es UUID", users.RoutingKeyEmailVerified, `{"user_id":"user-1","verified_at":"2026-09-26T14:35:00Z"}`, audit.StatusDiscardedInvalid},
+		{"email verificado: id vacío", users.RoutingKeyEmailVerified, `{"verified_at":"2026-09-26T14:35:00Z"}`, audit.StatusDiscardedInvalid},
 		{"clave desconocida", "users.otra_cosa", `{}`, audit.StatusDiscardedUnknownKey},
 	}
 	for _, tc := range cases {
@@ -94,7 +127,7 @@ func TestInvalidEventsAreDiscardedWithoutTouchingTheStore(t *testing.T) {
 			if got := status(t, err); got != tc.want {
 				t.Errorf("status = %s, quería %s", got, tc.want)
 			}
-			if len(sync.registrations)+len(sync.profiles) != 0 {
+			if len(sync.registrations)+len(sync.profiles)+len(sync.verified) != 0 {
 				t.Error("un evento inválido no debe llegar a la base")
 			}
 		})
@@ -105,7 +138,7 @@ func TestInvalidEventsAreDiscardedWithoutTouchingTheStore(t *testing.T) {
 // el consumer reencole el mensaje y no se pierda el evento.
 func TestStoreErrorIsTransientNotDiscarded(t *testing.T) {
 	boom := errors.New("db caída")
-	for _, key := range []string{users.RoutingKeyAccountRegistered, users.RoutingKeyProfileUpdated} {
+	for _, key := range []string{users.RoutingKeyAccountRegistered, users.RoutingKeyProfileUpdated, users.RoutingKeyEmailVerified} {
 		body := `{"user_id":"` + validID + `","email":"a@b.c","name":"n","version":1,"created_at":"2026-09-26T14:30:00Z"}`
 		err := NewUserEventsHandler(&fakeSync{err: boom}).Handle(context.Background(), key, []byte(body))
 		if !errors.Is(err, boom) {

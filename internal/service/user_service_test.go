@@ -20,6 +20,7 @@ type fakeUserRepo struct {
 
 	registration *repository.Registration
 	profile      *repository.Profile
+	verified     string
 
 	foundID  string
 	lookedUp string
@@ -47,6 +48,11 @@ func (f *fakeUserRepo) UpsertRegistration(_ context.Context, r repository.Regist
 	return f.err
 }
 
+func (f *fakeUserRepo) MarkEmailVerified(_ context.Context, userID string) error {
+	f.verified = userID
+	return f.err
+}
+
 func (f *fakeUserRepo) UpsertProfile(_ context.Context, p repository.Profile) error {
 	f.profile = &p
 	return f.err
@@ -64,6 +70,9 @@ func TestApplyDelegatesToRepository(t *testing.T) {
 	if err := svc.ApplyProfile(context.Background(), prof); err != nil || repo.profile == nil || *repo.profile != prof {
 		t.Errorf("ApplyProfile: err=%v repo=%+v", err, repo.profile)
 	}
+	if err := svc.ApplyEmailVerification(context.Background(), "u1"); err != nil || repo.verified != "u1" {
+		t.Errorf("ApplyEmailVerification: err=%v repo=%q", err, repo.verified)
+	}
 
 	boom := errors.New("boom")
 	repo.err = boom
@@ -72,6 +81,9 @@ func TestApplyDelegatesToRepository(t *testing.T) {
 	}
 	if err := svc.ApplyProfile(context.Background(), prof); !errors.Is(err, boom) {
 		t.Errorf("ApplyProfile debe propagar el error de la base: %v", err)
+	}
+	if err := svc.ApplyEmailVerification(context.Background(), "u1"); !errors.Is(err, boom) {
+		t.Errorf("ApplyEmailVerification debe propagar el error de la base: %v", err)
 	}
 }
 
@@ -117,7 +129,7 @@ func TestListRejectsInvalidStatusWithoutQuerying(t *testing.T) {
 }
 
 func TestListAcceptsEmptyAndKnownStatus(t *testing.T) {
-	for _, s := range []model.UserStatus{"", model.UserStatusActive, model.UserStatusSuspended} {
+	for _, s := range []model.UserStatus{"", model.UserStatusActive, model.UserStatusPending, model.UserStatusSuspended} {
 		if _, err := NewUserService(&fakeUserRepo{}).List(context.Background(), ListUsersParams{Status: s}); err != nil {
 			t.Errorf("status %q: %v", s, err)
 		}

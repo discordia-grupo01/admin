@@ -225,7 +225,10 @@ components:
             details: { type: object, additionalProperties: true }
     UserStatus:
       type: string
-      enum: [active, suspended]
+      enum: [active, pending, suspended]
+      description: |
+        `suspended` si el staff suspendió la cuenta; si no, `pending` mientras
+        el usuario no confirmó su email y `active` después.
     User:
       type: object
       required: [id, name, email, status, created_at, suspended_at]
@@ -242,7 +245,7 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: Cuándo se suspendió; null si está activo.
+          description: Cuándo se suspendió; null si no está suspendido.
     UserList:
       type: object
       required: [users, total, limit, offset]
