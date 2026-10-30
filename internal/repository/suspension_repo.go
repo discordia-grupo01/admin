@@ -96,7 +96,7 @@ func (r *postgresSuspensionRepository) Suspend(ctx context.Context, userID, staf
 		   SET status = 'suspended', suspended_at = $2, suspended_by = $3,
 		       suspension_version = $4, updated_at = now()
 		 WHERE user_id = $1
-		RETURNING user_id, name, email, status, registered_at`,
+		RETURNING user_id, name, email,`+userStatusExpr+`, registered_at`,
 		userID, at, staffID, version).Scan(&u.ID, &name, &email, &u.Status, &u.CreatedAt); err != nil {
 		return nil, fmt.Errorf("suspender a %s: %w", userID, err)
 	}
@@ -155,7 +155,7 @@ func (r *postgresSuspensionRepository) Reactivate(ctx context.Context, userID st
 		   SET status = 'active', suspended_at = NULL, suspended_by = NULL,
 		       suspension_version = $2, updated_at = now()
 		 WHERE user_id = $1
-		RETURNING user_id, name, email, status, registered_at`,
+		RETURNING user_id, name, email,`+userStatusExpr+`, registered_at`,
 		userID, version).Scan(&u.ID, &name, &email, &u.Status, &u.CreatedAt); err != nil {
 		return nil, fmt.Errorf("reactivar a %s: %w", userID, err)
 	}

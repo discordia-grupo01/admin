@@ -231,6 +231,26 @@ func TestReactivateClearsTheSuspensionAndWritesTheEvent(t *testing.T) {
 	}
 }
 
+// Reactivar a alguien que nunca confirmó su email lo devuelve como pendiente,
+// igual que el listado.
+func TestReactivateUnverifiedUserReturnsPending(t *testing.T) {
+	repo, db := newSuspensionRepo(t)
+	seed(t, db, []seedUser{{n: 1, name: "Ale", email: "ale@example.com", registeredDaysAfter: 0}})
+	markPending(t, db, 1)
+	ctx := context.Background()
+	if _, err := repo.Suspend(ctx, uid(1), uid(99), suspendedAt, eventFor("admin.user_suspended")); err != nil {
+		t.Fatal(err)
+	}
+
+	u, err := repo.Reactivate(ctx, uid(1), eventFor("admin.user_reactivated"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Status != model.UserStatusPending || u.SuspendedAt != nil {
+		t.Errorf("usuario devuelto: %+v, quería pending sin suspended_at", u)
+	}
+}
+
 func TestSuspendReactivateSuspendKeepsVersionsGrowing(t *testing.T) {
 	repo, db := newSuspensionRepo(t)
 	seed(t, db, []seedUser{{n: 1, name: "Ale", email: "ale@example.com", registeredDaysAfter: 0}})

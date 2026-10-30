@@ -17,16 +17,17 @@ import (
 const QueueUsers = "admin.users"
 
 // UserBindings son las routing keys que alimentan la réplica de usuarios.
-var UserBindings = []string{users.RoutingKeyAccountRegistered, users.RoutingKeyProfileUpdated}
+var UserBindings = []string{users.RoutingKeyAccountRegistered, users.RoutingKeyProfileUpdated, users.RoutingKeyEmailVerified}
 
 // UserSync es lo que el handler necesita para aplicar los eventos de usuarios.
 type UserSync interface {
 	ApplyRegistration(ctx context.Context, r repository.Registration) error
 	ApplyProfile(ctx context.Context, p repository.Profile) error
+	ApplyEmailVerification(ctx context.Context, userID string) error
 }
 
-// UserEventsHandler aplica users.account_registered y users.profile_updated a
-// la réplica de usuarios. Los mensajes que nunca van a poder procesarse
+// UserEventsHandler aplica users.account_registered, users.profile_updated y
+// users.email_verified a la réplica de usuarios. Los mensajes que nunca van a poder procesarse
 // (JSON roto, ids inválidos, clave desconocida) se descartan; un error de
 // base se devuelve tal cual para que el mensaje se reencole.
 type UserEventsHandler struct {
@@ -43,6 +44,8 @@ func (h *UserEventsHandler) Handle(ctx context.Context, routingKey string, body 
 		return h.accountRegistered(ctx, body)
 	case users.RoutingKeyProfileUpdated:
 		return h.profileUpdated(ctx, body)
+	case users.RoutingKeyEmailVerified:
+		return h.emailVerified(ctx, body)
 	default:
 		return Discard(audit.StatusDiscardedUnknownKey, fmt.Errorf("routing key desconocida %q", routingKey))
 	}
@@ -65,11 +68,24 @@ func (h *UserEventsHandler) accountRegistered(ctx context.Context, body []byte) 
 		return Discard(audit.StatusDiscardedInvalid, errors.New("created_at vacío"))
 	}
 	return h.sync.ApplyRegistration(ctx, repository.Registration{
-		UserID:       id,
-		Email:        email,
-		Name:         e.Name,
-		RegisteredAt: e.CreatedAt.UTC(),
+		UserID:        id,
+		Email:         email,
+		Name:          e.Name,
+		RegisteredAt:  e.CreatedAt.UTC(),
+		EmailVerified: e.EmailVerified,
 	})
+}
+
+func (h *UserEventsHandler) emailVerified(ctx context.Context, body []byte) error {
+	var e users.EmailVerified
+	if err := json.Unmarshal(body, &e); err != nil {
+		return Discard(audit.StatusDiscardedMalformed, err)
+	}
+	id, err := parseUserID(e.UserID)
+	if err != nil {
+		return Discard(audit.StatusDiscardedInvalid, err)
+	}
+	return h.sync.ApplyEmailVerification(ctx, id)
 }
 
 func (h *UserEventsHandler) profileUpdated(ctx context.Context, body []byte) error {

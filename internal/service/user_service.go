@@ -9,8 +9,8 @@ import (
 	"github.com/discordia-grupo01/admin/internal/repository"
 )
 
-// ErrInvalidStatus indica un filtro de estado que no es active ni suspended.
-var ErrInvalidStatus = errors.New("estado inválido: debe ser active o suspended")
+// ErrInvalidStatus indica un filtro de estado que no es active, pending ni suspended.
+var ErrInvalidStatus = errors.New("estado inválido: debe ser active, pending o suspended")
 
 type ListUsersParams struct {
 	Search string
@@ -37,6 +37,12 @@ func (s *UserService) FindIDByEmail(ctx context.Context, email string) (string, 
 // ApplyRegistration da de alta al usuario en la réplica (users.account_registered).
 func (s *UserService) ApplyRegistration(ctx context.Context, r repository.Registration) error {
 	return s.users.UpsertRegistration(ctx, r)
+}
+
+// ApplyEmailVerification marca el email del usuario como verificado
+// (users.email_verified): deja de figurar como pendiente.
+func (s *UserService) ApplyEmailVerification(ctx context.Context, userID string) error {
+	return s.users.MarkEmailVerified(ctx, userID)
 }
 
 // ApplyProfile actualiza el nombre del usuario (users.profile_updated); se
