@@ -93,6 +93,12 @@ func run() error {
 	suspensions := handler.NewSuspensionHandler(
 		service.NewSuspensionService(repository.NewSuspensionRepository(db), cfg.AdminEventsHMACSecret))
 
+	// Eliminar un servidor registra el pedido y deja el evento firmado en el
+	// outbox; servers hace el borrado y el servidor sale del listado cuando lo
+	// confirma con servers.server_deleted.
+	serverModeration := handler.NewServerModerationHandler(
+		service.NewServerModerationService(repository.NewServerModerationRepository(db), cfg.AdminEventsHMACSecret))
+
 	router := handler.NewRouter(handler.Deps{
 		JWTSecret: []byte(cfg.JWTSecret),
 		Staff:     staff,
@@ -100,7 +106,7 @@ func run() error {
 			handler.Check{Name: "postgres", Fn: db.PingContext},
 			handler.Check{Name: "rabbitmq", Fn: func(context.Context) error { return publisher.Ping() }},
 		),
-	}, users.Register, handler.NewServerHandler(serverService).Register, suspensions.Register)
+	}, users.Register, handler.NewServerHandler(serverService).Register, suspensions.Register, serverModeration.Register)
 
 	server := &http.Server{
 		Addr:              cfg.Addr(),
