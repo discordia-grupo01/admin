@@ -19,6 +19,10 @@ const (
 	CodeCannotSuspendStaff   = "CANNOT_SUSPEND_STAFF"
 	CodeUserAlreadySuspended = "USER_ALREADY_SUSPENDED"
 	CodeUserNotSuspended     = "USER_NOT_SUSPENDED"
+
+	CodeInvalidBody                = "INVALID_BODY"
+	CodeServerNotFound             = "SERVER_NOT_FOUND"
+	CodeDeleteConfirmationMismatch = "DELETE_CONFIRMATION_MISMATCH"
 )
 
 type Body struct {
