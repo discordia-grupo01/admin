@@ -121,6 +121,10 @@ Esquemas en [`discordia-docs`](https://github.com/discordia-grupo01/docs) (`asyn
 
 **Consume** (cola `admin.servers`, ack manual): `servers.server_updated`, `servers.server_deleted`, `servers.member_joined` y `servers.member_left`. Alimentan la réplica de servidores del listado. Ninguno trae versión, así que se ordenan por `occurred_at`: gana la foto de servidor más nueva y, por cada par servidor-usuario, el último evento de membresía. `server_deleted` deja el servidor marcado como borrado (un `server_updated` tardío no lo resucita) y descarta sus membresías. Un servidor no aparece hasta que llega su `server_updated`. Los mensajes inválidos se descartan y quedan en `consumed_events`; las fallas de base se reencolan.
 
+**Eliminación de servidores** (HU #68). `DELETE /v1/admin/servers/{id}` (con `confirm_name` en el cuerpo) publica `admin.server_deletion_requested`, con `server_id` y `version`, firmado igual que los de usuario. Es un **pedido**, no el hecho: admin solo registra el pedido (`deletion_requested_at` y `deletion_requested_by` en `servers`) y sube `moderation_version`; el borrado lo hace servers, que después publica `servers.server_deleted`, y recién entonces el servidor sale del listado. Mientras tanto (normalmente unos segundos) sigue apareciendo. Si el evento se pierde, el servidor no se borra y el pedido se puede repetir: cada uno lleva una `version` mayor y servers es idempotente.
+
+**Orden de despliegue**: servers, messaging y voz tienen que consumir los eventos `admin.server_*` **antes** de que se despliegue este servicio. Si admin va primero, RabbitMQ descarta los eventos que no tienen una cola enlazada y un pedido de eliminación se pierde sin avisar (el servidor sigue visible y se puede repetir, pero conviene evitarlo).
+
 Hasta que identify publique `users.account_registered` y servers publique `servers.server_updated`, las tablas de usuarios y servidores solo se llenan en los tests.
 
 ## Deploy

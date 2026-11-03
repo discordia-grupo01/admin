@@ -179,6 +179,52 @@ paths:
         "400": { $ref: "#/components/responses/InvalidQuery" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/servers/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Servers]
+      summary: Eliminar un servidor desde el backoffice (HU #68)
+      description: |
+        Pide la eliminación definitiva del servidor con todos sus canales,
+        mensajes y roles. El staff confirma escribiendo el nombre del servidor
+        (`confirm_name`), que se compara sin espacios en los bordes y distinguiendo
+        mayúsculas contra el nombre que admin tiene replicado.
+
+        Admin **no borra nada**: registra el pedido y, en la misma transacción,
+        deja escrito el evento `admin.server_deletion_requested` (firmado con
+        HMAC) para que lo publique el outbox. `servers` ejecuta el borrado y
+        avisa con `servers.server_deleted`; recién entonces el servidor
+        desaparece de `GET /v1/admin/servers`. Hasta ese momento (normalmente
+        unos segundos) sigue en el listado. Si el evento se pierde el servidor
+        no se borra y el pedido se puede repetir: cada pedido publica un evento
+        con una `version` mayor y `servers` es idempotente.
+
+        Es irreversible. Un `{id}` que no es un UUID se trata como servidor
+        inexistente. Sin `confirm_name` o con un nombre distinto no se hace nada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeleteServerRequest" }
+      responses:
+        "202":
+          description: Pedido aceptado; la eliminación se completa de forma asíncrona. Sin cuerpo.
+        "400":
+          description: El cuerpo no es un JSON válido (`INVALID_BODY`) o `confirm_name` falta o no es el nombre del servidor (`DELETE_CONFIRMATION_MISMATCH`, con `details.field = "confirm_name"`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: El servidor no existe, todavía no llegó a la réplica o ya fue eliminado (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 components:
   securitySchemes:
     bearerAuth:
@@ -279,3 +325,11 @@ components:
         total: { type: integer, description: Cantidad de servidores que cumplen el filtro. }
         limit: { type: integer }
         offset: { type: integer }
+    DeleteServerRequest:
+      type: object
+      required: [confirm_name]
+      properties:
+        confirm_name:
+          type: string
+          description: Nombre del servidor, tal como lo ve el staff. Sin espacios en los bordes; distingue mayúsculas.
+          example: Sala de prueba
