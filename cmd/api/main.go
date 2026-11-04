@@ -49,7 +49,7 @@ func run() error {
 	log.Println("conexión exitosa a PostgreSQL")
 
 	staff := service.NewStaffService(repository.NewStaffRepository(db))
-	if err := staff.Seed(ctx, cfg.StaffUserIDs); err != nil {
+	if err := staff.SeedWithEvents(ctx, cfg.StaffUserIDs, cfg.AdminEventsHMACSecret); err != nil {
 		return err
 	}
 

@@ -13,7 +13,7 @@ Servicio de **Administración** de Discordia: la API del backoffice para el staf
 ## Cómo funciona
 - **Réplica por eventos**: admin no consulta a identify ni a servers. Arma su propia copia de usuarios y servidores a partir de los eventos que ellos publican.
 - **Outbox transaccional**: cada cambio de negocio inserta su evento en `outbox_events` en la misma transacción; un poller lo publica en RabbitMQ. Un corte del broker demora el evento, no lo pierde.
-- **Staff**: los endpoints `/v1/admin/*` exigen un JWT válido (el mismo `JWT_SECRET` que identify, HS256) de un usuario que esté en la tabla `staff_members`. El staff se siembra al arrancar desde `STAFF_USER_IDS`; no hay forma de auto-asignarse el rol desde la API.
+- **Staff**: los endpoints `/v1/admin/*` exigen un JWT válido (el mismo `JWT_SECRET` que identify, HS256) de un usuario que esté en la tabla `staff_members`. Al sembrar staff, admin publica eventos firmados `admin.staff_member_added` para que otros servicios mantengan su propia proyección de autorización.
 
 ## Setup local
 Requiere Go 1.22+ y Docker.
@@ -64,7 +64,7 @@ Cada evento sale con la `version` vigente del usuario, un `event_id` nuevo y su 
 | DATABASE_SCHEMA | - | Fija el `search_path` (ej. `admin` en Supabase). Vacío en local. |
 | JWT_SECRET | - | **Obligatoria.** Secreto con el que identify firma los JWT. |
 | RABBITMQ_URL | - | **Obligatoria.** URL de conexión a RabbitMQ. |
-| ADMIN_EVENTS_HMAC_SECRET | - | **Obligatoria.** Secreto con el que se firman los eventos `admin.*`. |
+| ADMIN_EVENTS_HMAC_SECRET | - | **Obligatoria.** Secreto con el que se firman los eventos `admin.*`, incluidos los cambios de staff. |
 | STAFF_USER_IDS | - | UUIDs de usuarios a sembrar como staff, separados por coma. |
 | OUTBOX_POLL_INTERVAL | 2s | Cada cuánto se publican los eventos pendientes. |
 

@@ -56,7 +56,11 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	defer db.Close()
 
 	staff := service.NewStaffService(repository.NewStaffRepository(db))
-	id, err := staff.SeedByEmail(ctx, service.NewUserService(repository.NewUserRepository(db)), *email)
+	secret := strings.TrimSpace(getenv("ADMIN_EVENTS_HMAC_SECRET"))
+	if secret == "" {
+		return errors.New("falta ADMIN_EVENTS_HMAC_SECRET para publicar el cambio de staff")
+	}
+	id, err := staff.SeedByEmailWithEvents(ctx, service.NewUserService(repository.NewUserRepository(db)), *email, secret)
 	if errors.Is(err, repository.ErrUserNotFound) {
 		return fmt.Errorf("no hay ningún usuario con el email %q en la réplica de admin: tiene que haberse registrado en identify y su alta (users.account_registered) tiene que haber llegado; si solo conocés su UUID, usá STAFF_USER_IDS", *email)
 	}
