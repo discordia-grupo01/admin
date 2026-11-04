@@ -9,6 +9,7 @@ import (
 
 	"github.com/discordia-grupo01/admin/internal/apierr"
 	"github.com/discordia-grupo01/admin/internal/middleware"
+	"github.com/discordia-grupo01/admin/internal/model"
 	"github.com/discordia-grupo01/admin/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -16,6 +17,8 @@ import (
 // ServerModerator es lo que el handler necesita del servicio de moderación de servidores.
 type ServerModerator interface {
 	Delete(ctx context.Context, serverID, confirmName, staffID string) error
+	Suspend(ctx context.Context, serverID, staffID string) (*model.Server, error)
+	Reactivate(ctx context.Context, serverID string) (*model.Server, error)
 }
 
 type ServerModerationHandler struct {
@@ -29,6 +32,8 @@ func NewServerModerationHandler(moderator ServerModerator) *ServerModerationHand
 // Register agrega las rutas de moderación de servidores al grupo /v1/admin.
 func (h *ServerModerationHandler) Register(admin *gin.RouterGroup) {
 	admin.DELETE("/servers/:id", h.Delete)
+	admin.POST("/servers/:id/suspension", h.Suspend)
+	admin.DELETE("/servers/:id/suspension", h.Reactivate)
 }
 
 type deleteServerRequest struct {
@@ -63,6 +68,45 @@ func (h *ServerModerationHandler) Delete(c *gin.Context) {
 			"El nombre ingresado no coincide con el del servidor", map[string]any{"field": "confirm_name"})
 	default:
 		log.Printf("handler: no se pudo pedir la eliminación del servidor %q: %v", c.Param("id"), err)
+		apierr.Internal(c)
+	}
+}
+
+// Suspend atiende POST /v1/admin/servers/{id}/suspension (HU #69). La suspensión
+// se aplica en admin al instante; servers, messaging y voz la aplican al
+// procesar el evento admin.server_suspended.
+func (h *ServerModerationHandler) Suspend(c *gin.Context) {
+	staffID := middleware.UserID(c)
+	s, err := h.moderator.Suspend(c.Request.Context(), c.Param("id"), staffID)
+	switch {
+	case err == nil:
+		log.Printf("handler: el staff %s suspendió el servidor %s", staffID, c.Param("id"))
+		c.JSON(http.StatusOK, s)
+	case errors.Is(err, service.ErrServerNotFound):
+		serverNotFound(c)
+	case errors.Is(err, service.ErrServerAlreadySuspended):
+		apierr.Abort(c, http.StatusConflict, apierr.CodeServerAlreadySuspended, "El servidor ya está suspendido", nil)
+	default:
+		log.Printf("handler: no se pudo suspender el servidor %q: %v", c.Param("id"), err)
+		apierr.Internal(c)
+	}
+}
+
+// Reactivate atiende DELETE /v1/admin/servers/{id}/suspension (HU #69). El
+// servidor vuelve a estar activo en admin al instante; los demás servicios
+// levantan el bloqueo al procesar el evento admin.server_reactivated.
+func (h *ServerModerationHandler) Reactivate(c *gin.Context) {
+	s, err := h.moderator.Reactivate(c.Request.Context(), c.Param("id"))
+	switch {
+	case err == nil:
+		log.Printf("handler: el staff %s reactivó el servidor %s", middleware.UserID(c), c.Param("id"))
+		c.JSON(http.StatusOK, s)
+	case errors.Is(err, service.ErrServerNotFound):
+		serverNotFound(c)
+	case errors.Is(err, service.ErrServerNotSuspended):
+		apierr.Abort(c, http.StatusConflict, apierr.CodeServerNotSuspended, "El servidor no está suspendido", nil)
+	default:
+		log.Printf("handler: no se pudo reactivar el servidor %q: %v", c.Param("id"), err)
 		apierr.Internal(c)
 	}
 }

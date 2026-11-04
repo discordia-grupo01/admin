@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 
@@ -29,7 +30,8 @@ func (h *ServerHandler) Register(admin *gin.RouterGroup) {
 	admin.GET("/servers", h.List)
 }
 
-// List atiende GET /v1/admin/servers?search=&limit=&offset= (HU #32).
+// List atiende GET /v1/admin/servers?search=&status=&limit=&offset= (HU #32).
+// status (active o suspended) es opcional; sin él se listan todos.
 func (h *ServerHandler) List(c *gin.Context) {
 	limit, ok := apierr.ParseNonNegativeIntQuery(c, "limit", model.DefaultLimit)
 	if !ok {
@@ -46,10 +48,15 @@ func (h *ServerHandler) List(c *gin.Context) {
 
 	list, err := h.servers.List(c.Request.Context(), service.ListServersParams{
 		Search: search,
+		Status: model.ServerStatus(c.Query("status")),
 		Limit:  limit,
 		Offset: offset,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidServerStatus) {
+			apierr.InvalidQuery(c, "status", "El parámetro status debe ser active o suspended")
+			return
+		}
 		log.Printf("handler: no se pudo listar servidores: %v", err)
 		apierr.Internal(c)
 		return

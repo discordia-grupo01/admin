@@ -11,11 +11,14 @@ import (
 	"testing"
 
 	"github.com/discordia-grupo01/admin/internal/apierr"
+	"github.com/discordia-grupo01/admin/internal/model"
 	"github.com/discordia-grupo01/admin/internal/service"
 )
 
 type fakeModerator struct {
-	err error
+	err    error
+	server *model.Server
+	action string
 
 	called     bool
 	gotServer  string
@@ -25,8 +28,23 @@ type fakeModerator struct {
 
 func (f *fakeModerator) Delete(_ context.Context, serverID, confirmName, staffID string) error {
 	f.called = true
+	f.action = "delete"
 	f.gotServer, f.gotConfirm, f.gotStaff = serverID, confirmName, staffID
 	return f.err
+}
+
+func (f *fakeModerator) Suspend(_ context.Context, serverID, staffID string) (*model.Server, error) {
+	f.called = true
+	f.action = "suspend"
+	f.gotServer, f.gotStaff = serverID, staffID
+	return f.server, f.err
+}
+
+func (f *fakeModerator) Reactivate(_ context.Context, serverID string) (*model.Server, error) {
+	f.called = true
+	f.action = "reactivate"
+	f.gotServer = serverID
+	return f.server, f.err
 }
 
 func moderationRouter(m ServerModerator) http.Handler {
