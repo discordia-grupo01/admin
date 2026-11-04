@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/discordia-grupo01/admin/internal/model"
 	"github.com/discordia-grupo01/admin/internal/repository"
 	"github.com/discordia-grupo01/events-contract/admin"
 )
@@ -32,6 +33,18 @@ func (f *fakeModerationRepo) RequestDeletion(_ context.Context, serverID, confir
 	}
 	f.key, f.payload = event(4)
 	return nil
+}
+
+func (f *fakeModerationRepo) Suspend(context.Context, string, string, time.Time, repository.EventBuilder) (*model.Server, error) {
+	return nil, errors.New("no se usa en estos tests")
+}
+
+func (f *fakeModerationRepo) Reactivate(context.Context, string, repository.EventBuilder) (*model.Server, error) {
+	return nil, errors.New("no se usa en estos tests")
+}
+
+func (f *fakeModerationRepo) ListSuspended(context.Context) ([]repository.SuspendedServer, error) {
+	return nil, errors.New("no se usa en estos tests")
 }
 
 func newModerationService(repo repository.ServerModerationRepository) *ServerModerationService {
