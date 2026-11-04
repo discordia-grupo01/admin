@@ -57,11 +57,16 @@ func (r *postgresStaffRepository) addAll(ctx context.Context, userIDs []string, 
 	defer func() { _ = tx.Rollback() }()
 
 	for _, id := range userIDs {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO staff_members (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, id); err != nil {
+		result, err := tx.ExecContext(ctx,
+			`INSERT INTO staff_members (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, id)
+		if err != nil {
 			return fmt.Errorf("alta de staff %s: %w", id, err)
 		}
-		if secret != "" {
+		inserted, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("comprobar alta de staff %s: %w", id, err)
+		}
+		if secret != "" && inserted == 1 {
 			eventID := uuid.NewString()
 			occurredAt := time.Now().UTC()
 			signature := signStaffEvent(secret, staffAddedRoutingKey, eventID, id, occurredAt)
