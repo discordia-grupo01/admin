@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 type ServerFilter struct {
 	// Search busca por nombre, parcial y sin distinguir mayúsculas.
 	Search string
+	// Status deja solo los servidores activos o solo los suspendidos.
+	Status model.ServerStatus
 }
 
 // ServerSnapshot es la foto completa de un servidor (servers.server_updated).
@@ -115,17 +118,68 @@ func (r *postgresServerRepository) SetMembership(ctx context.Context, m Membersh
 	return nil
 }
 
+// El estado se deriva de suspended_at: un servidor está suspendido si lo tiene.
 const serverFilterClause = `
 	created_at IS NOT NULL
 	AND deleted_at IS NULL
-	AND ($1 = '' OR name ILIKE $2 ESCAPE '\')`
+	AND ($1 = '' OR name ILIKE $2 ESCAPE '\')
+	AND ($3 = '' OR ($3 = 'suspended') = (suspended_at IS NOT NULL))`
+
+// serverColumns son las columnas de un servidor tal como lo ve el backoffice,
+// sobre `servers s LEFT JOIN users u` (u es el dueño).
+const serverColumns = `s.server_id, s.name, s.owner_id, u.name, s.created_at,
+	(SELECT count(*) FROM server_members m WHERE m.server_id = s.server_id AND m.is_member),
+	s.suspended_at`
+
+// scanServer lee una fila con las columnas de serverColumns.
+func scanServer(row interface{ Scan(dest ...any) error }) (model.Server, error) {
+	var s model.Server
+	var name, ownerID, ownerName sql.NullString
+	var suspendedAt sql.NullTime
+	if err := row.Scan(&s.ID, &name, &ownerID, &ownerName, &s.CreatedAt, &s.MemberCount, &suspendedAt); err != nil {
+		return model.Server{}, err
+	}
+	s.Name, s.OwnerID = name.String, ownerID.String
+	if ownerName.Valid {
+		s.OwnerName = &ownerName.String
+	}
+	s.CreatedAt = s.CreatedAt.UTC()
+	if suspendedAt.Valid {
+		at := suspendedAt.Time.UTC()
+		s.SuspendedAt = &at
+	}
+	return s, nil
+}
+
+// rowQuerier es lo que tienen en común *sql.DB y *sql.Tx.
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// getServer devuelve un servidor con el dueño y la cantidad de miembros, o
+// ErrServerNotFound si no hay fila. No mira si está borrado ni si tiene foto:
+// quien lo llama ya lo verificó (por ejemplo, tras bloquear la fila).
+func getServer(ctx context.Context, q rowQuerier, serverID string) (*model.Server, error) {
+	s, err := scanServer(q.QueryRowContext(ctx, `
+		SELECT `+serverColumns+`
+		  FROM servers s LEFT JOIN users u ON u.user_id = s.owner_id
+		 WHERE s.server_id = $1`, serverID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrServerNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("leer el servidor %s: %w", serverID, err)
+	}
+	return &s, nil
+}
 
 func (r *postgresServerRepository) List(ctx context.Context, filter ServerFilter, limit, offset int) ([]model.Server, int, error) {
 	pattern := likePattern(filter.Search)
+	status := string(filter.Status)
 
 	var total int
 	if err := r.db.QueryRowContext(ctx,
-		`SELECT count(*) FROM servers WHERE`+serverFilterClause, filter.Search, pattern,
+		`SELECT count(*) FROM servers WHERE`+serverFilterClause, filter.Search, pattern, status,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("contar servidores: %w", err)
 	}
@@ -134,15 +188,14 @@ func (r *postgresServerRepository) List(ctx context.Context, filter ServerFilter
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT s.server_id, s.name, s.owner_id, u.name, s.created_at,
-		       (SELECT count(*) FROM server_members m WHERE m.server_id = s.server_id AND m.is_member)
+		SELECT `+serverColumns+`
 		  FROM (SELECT * FROM servers
 		         WHERE`+serverFilterClause+`
 		         ORDER BY created_at DESC, server_id
-		         LIMIT $3 OFFSET $4) s
+		         LIMIT $4 OFFSET $5) s
 		  LEFT JOIN users u ON u.user_id = s.owner_id
 		 ORDER BY s.created_at DESC, s.server_id`,
-		filter.Search, pattern, limit, offset)
+		filter.Search, pattern, status, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listar servidores: %w", err)
 	}
@@ -150,16 +203,10 @@ func (r *postgresServerRepository) List(ctx context.Context, filter ServerFilter
 
 	servers := []model.Server{}
 	for rows.Next() {
-		var s model.Server
-		var name, ownerID, ownerName sql.NullString
-		if err := rows.Scan(&s.ID, &name, &ownerID, &ownerName, &s.CreatedAt, &s.MemberCount); err != nil {
+		s, err := scanServer(rows)
+		if err != nil {
 			return nil, 0, fmt.Errorf("leer un servidor: %w", err)
 		}
-		s.Name, s.OwnerID = name.String, ownerID.String
-		if ownerName.Valid {
-			s.OwnerName = &ownerName.String
-		}
-		s.CreatedAt = s.CreatedAt.UTC()
 		servers = append(servers, s)
 	}
 	if err := rows.Err(); err != nil {

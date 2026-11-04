@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/discordia-grupo01/admin/internal/model"
 	"github.com/discordia-grupo01/admin/internal/repository"
 	"github.com/discordia-grupo01/events-contract/admin"
 )
@@ -14,6 +15,8 @@ const testServerID = "c3d4e5f6-0a1b-4c2d-9e3f-5a6b7c8d9e0f"
 
 type fakeModerationRepo struct {
 	err error
+
+	suspended []repository.SuspendedServer
 
 	called      bool
 	serverID    string
@@ -32,6 +35,30 @@ func (f *fakeModerationRepo) RequestDeletion(_ context.Context, serverID, confir
 	}
 	f.key, f.payload = event(4)
 	return nil
+}
+
+func (f *fakeModerationRepo) Suspend(_ context.Context, serverID, staffID string, at time.Time, event repository.EventBuilder) (*model.Server, error) {
+	f.called = true
+	f.serverID, f.staffID, f.at = serverID, staffID, at
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.key, f.payload = event(4)
+	return &model.Server{ID: serverID, SuspendedAt: &at}, nil
+}
+
+func (f *fakeModerationRepo) Reactivate(_ context.Context, serverID string, event repository.EventBuilder) (*model.Server, error) {
+	f.called = true
+	f.serverID = serverID
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.key, f.payload = event(5)
+	return &model.Server{ID: serverID}, nil
+}
+
+func (f *fakeModerationRepo) ListSuspended(context.Context) ([]repository.SuspendedServer, error) {
+	return f.suspended, f.err
 }
 
 func newModerationService(repo repository.ServerModerationRepository) *ServerModerationService {

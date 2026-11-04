@@ -22,6 +22,8 @@ const (
 
 	CodeInvalidBody                = "INVALID_BODY"
 	CodeServerNotFound             = "SERVER_NOT_FOUND"
+	CodeServerAlreadySuspended     = "SERVER_ALREADY_SUSPENDED"
+	CodeServerNotSuspended         = "SERVER_NOT_SUSPENDED"
 	CodeDeleteConfirmationMismatch = "DELETE_CONFIRMATION_MISMATCH"
 )
 

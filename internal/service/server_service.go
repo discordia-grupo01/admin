@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,8 +10,13 @@ import (
 	"github.com/discordia-grupo01/admin/internal/repository"
 )
 
+// ErrInvalidServerStatus indica un filtro de estado que no es active ni suspended.
+var ErrInvalidServerStatus = errors.New("estado inválido: debe ser active o suspended")
+
 type ListServersParams struct {
 	Search string
+	// Status vacío = todos.
+	Status model.ServerStatus
 	Limit  int
 	Offset int
 }
@@ -41,11 +47,15 @@ func (s *ServerService) ApplyMembership(ctx context.Context, m repository.Member
 }
 
 // List devuelve una página de servidores con el filtro pedido. El límite se
-// normaliza (default 20, máximo 100).
+// normaliza (default 20, máximo 100) y un estado desconocido se rechaza con
+// ErrInvalidServerStatus antes de consultar.
 func (s *ServerService) List(ctx context.Context, p ListServersParams) (*model.ServerList, error) {
+	if p.Status != "" && !p.Status.Valid() {
+		return nil, ErrInvalidServerStatus
+	}
 	limit := model.NormalizeLimit(p.Limit)
 
-	servers, total, err := s.servers.List(ctx, repository.ServerFilter{Search: p.Search}, limit, p.Offset)
+	servers, total, err := s.servers.List(ctx, repository.ServerFilter{Search: p.Search, Status: p.Status}, limit, p.Offset)
 	if err != nil {
 		return nil, fmt.Errorf("listar servidores: %w", err)
 	}
