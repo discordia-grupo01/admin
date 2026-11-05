@@ -1,5 +1,7 @@
 // Command republishsuspensions vuelve a publicar un admin.user_suspended por cada
-// usuario suspendido, con su versión vigente.
+// usuario suspendido y un admin.server_suspended por cada servidor suspendido
+// (que no esté borrado), con su versión vigente. Primero salen los usuarios y
+// después los servidores.
 //
 //	go run ./cmd/republishsuspensions
 //	go run ./cmd/republishsuspensions --dry-run
@@ -80,29 +82,45 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	}
 	defer db.Close()
 
-	svc := service.NewSuspensionService(repository.NewSuspensionRepository(db), secret)
+	users := service.NewSuspensionService(repository.NewSuspensionRepository(db), secret)
+	servers := service.NewServerModerationService(repository.NewServerModerationRepository(db), secret)
 
 	if *dryRun {
-		n, err := svc.RepublishSuspensions(ctx, countingPublisher{})
+		nUsers, err := users.RepublishSuspensions(ctx, countingPublisher{})
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "[dry-run] hay %d suspensión(es) vigente(s); no se publicó nada\n", n)
+		nServers, err := servers.RepublishServerSuspensions(ctx, countingPublisher{})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "[dry-run] hay %d suspensión(es) de usuarios y %d de servidores vigente(s); no se publicó nada\n", nUsers, nServers)
 		return nil
 	}
 
 	pub := newPublisher(rabbitURL)
 	defer pub.Close()
-	n, err := svc.RepublishSuspensions(ctx, pub)
+
+	nUsers, err := users.RepublishSuspensions(ctx, pub)
 	if err != nil {
-		var already string
-		if n > 0 {
-			already = fmt.Sprintf(" (se alcanzaron a publicar %d)", n)
-		}
-		return errors.Join(fmt.Errorf("no se pudieron re-publicar todas las suspensiones%s", already), err)
+		return errors.Join(fmt.Errorf("no se pudieron re-publicar todas las suspensiones de usuarios%s", reached(nUsers)), err)
 	}
-	fmt.Fprintf(out, "%d suspensión(es) re-publicada(s)\n", n)
+	fmt.Fprintf(out, "%d suspensión(es) de usuarios re-publicada(s)\n", nUsers)
+
+	nServers, err := servers.RepublishServerSuspensions(ctx, pub)
+	if err != nil {
+		return errors.Join(fmt.Errorf("se re-publicaron %d de usuarios, pero no todas las suspensiones de servidores%s", nUsers, reached(nServers)), err)
+	}
+	fmt.Fprintf(out, "%d suspensión(es) de servidores re-publicada(s)\n", nServers)
 	return nil
+}
+
+// reached aclara cuántos eventos alcanzaron a publicarse antes de un error.
+func reached(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (se alcanzaron a publicar %d)", n)
 }
 
 // countingPublisher no publica nada: sirve para contar en --dry-run.

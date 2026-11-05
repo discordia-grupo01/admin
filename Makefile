@@ -35,7 +35,8 @@ seed-staff:
 	@test -n "$(EMAIL)" || (echo "falta EMAIL: make seed-staff EMAIL=manu@example.com" >&2; exit 1)
 	go run ./cmd/seedstaff --email "$(EMAIL)"
 
-# Vuelve a publicar un admin.user_suspended por cada suspendido, para poner al
+# Vuelve a publicar un admin.user_suspended por cada usuario suspendido y un
+# admin.server_suspended por cada servidor suspendido, para poner al
 # día a un consumidor nuevo. Uso: make republish-suspensions [ARGS=--dry-run]
 republish-suspensions:
 	go run ./cmd/republishsuspensions $(ARGS)

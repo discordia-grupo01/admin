@@ -2,6 +2,20 @@ package model
 
 import "time"
 
+// ServerStatus es el estado de un servidor para el backoffice. No se guarda: se
+// deriva de si tiene una suspensión vigente (Server.SuspendedAt).
+type ServerStatus string
+
+const (
+	ServerStatusActive    ServerStatus = "active"
+	ServerStatusSuspended ServerStatus = "suspended"
+)
+
+// Valid dice si s es un estado conocido.
+func (s ServerStatus) Valid() bool {
+	return s == ServerStatusActive || s == ServerStatusSuspended
+}
+
 // Server es un servidor tal como lo ve el backoffice.
 type Server struct {
 	ID      string `json:"id"`
@@ -11,6 +25,8 @@ type Server struct {
 	OwnerName   *string   `json:"owner_name"`
 	MemberCount int       `json:"member_count"`
 	CreatedAt   time.Time `json:"created_at"`
+	// SuspendedAt es null si el servidor no está suspendido.
+	SuspendedAt *time.Time `json:"suspended_at"`
 }
 
 // ServerList es una página del listado de servidores.

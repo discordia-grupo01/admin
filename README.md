@@ -13,7 +13,7 @@ Servicio de **Administración** de Discordia: la API del backoffice para el staf
 ## Cómo funciona
 - **Réplica por eventos**: admin no consulta a identify ni a servers. Arma su propia copia de usuarios y servidores a partir de los eventos que ellos publican.
 - **Outbox transaccional**: cada cambio de negocio inserta su evento en `outbox_events` en la misma transacción; un poller lo publica en RabbitMQ. Un corte del broker demora el evento, no lo pierde.
-- **Staff**: los endpoints `/v1/admin/*` exigen un JWT válido (el mismo `JWT_SECRET` que identify, HS256) de un usuario que esté en la tabla `staff_members`. El staff se siembra al arrancar desde `STAFF_USER_IDS`; no hay forma de auto-asignarse el rol desde la API.
+- **Staff**: los endpoints `/v1/admin/*` exigen un JWT válido (el mismo `JWT_SECRET` que identify, HS256) de un usuario que esté en la tabla `staff_members`. Al sembrar staff, admin publica eventos firmados `admin.staff_member_added` para que otros servicios mantengan su propia proyección de autorización.
 
 ## Setup local
 Requiere Go 1.22+ y Docker.
@@ -40,12 +40,14 @@ El rol de staff no se puede auto-asignar desde la API: se otorga por fuera, de d
 Para quitarle el rol a alguien: borrar su fila de `staff_members` y sacarlo de `STAFF_USER_IDS` (si no, se vuelve a sembrar al arrancar).
 
 ## Poner al día a un consumidor nuevo
-RabbitMQ no guarda los eventos publicados antes de que exista la cola de un consumidor. Si identify, servers, messaging o voz se despliegan (o se reinician con la cola vacía) después de que ya había usuarios suspendidos, no se enteran de ellos. Para ponerlos al día:
+RabbitMQ no guarda los eventos publicados antes de que exista la cola de un consumidor. Si identify, servers, messaging o voz se despliegan (o se reinician con la cola vacía) después de que ya había usuarios o servidores suspendidos, no se enteran de ellos. Para ponerlos al día:
 
 ```bash
-make republish-suspensions ARGS=--dry-run   # cuenta las suspensiones vigentes, sin publicar
-make republish-suspensions                  # publica un admin.user_suspended por cada suspendido
+make republish-suspensions ARGS=--dry-run   # cuenta las suspensiones vigentes (usuarios y servidores), sin publicar
+make republish-suspensions                  # publica un admin.user_suspended por cada usuario suspendido y un admin.server_suspended por cada servidor suspendido
 ```
+
+Primero salen los usuarios y después los servidores. Un servidor suspendido que ya fue borrado no se vuelve a publicar. Si falla la publicación de los servidores, el error aclara cuántas suspensiones de usuarios ya habían salido; repetir el comando es seguro.
 
 Cada evento sale con la `version` vigente del usuario, un `event_id` nuevo y su propia firma. Es seguro repetirlo: los consumidores ignoran lo que ya aplicaron. Publica directo al broker (no pasa por el outbox), usa `DATABASE_*`, `RABBITMQ_URL` y `ADMIN_EVENTS_HMAC_SECRET`, y si RabbitMQ no responde falla con un error. Hay que correrlo una vez por cada consumidor nuevo.
 
@@ -64,7 +66,7 @@ Cada evento sale con la `version` vigente del usuario, un `event_id` nuevo y su 
 | DATABASE_SCHEMA | - | Fija el `search_path` (ej. `admin` en Supabase). Vacío en local. |
 | JWT_SECRET | - | **Obligatoria.** Secreto con el que identify firma los JWT. |
 | RABBITMQ_URL | - | **Obligatoria.** URL de conexión a RabbitMQ. |
-| ADMIN_EVENTS_HMAC_SECRET | - | **Obligatoria.** Secreto con el que se firman los eventos `admin.*`. |
+| ADMIN_EVENTS_HMAC_SECRET | - | **Obligatoria.** Secreto con el que se firman los eventos `admin.*`, incluidos los cambios de staff. |
 | STAFF_USER_IDS | - | UUIDs de usuarios a sembrar como staff, separados por coma. |
 | OUTBOX_POLL_INTERVAL | 2s | Cada cuánto se publican los eventos pendientes. |
 
@@ -102,7 +104,7 @@ discordia-admin/
 - `make build` - compila el binario en `bin/api`.
 - `make migrate` - aplica las migraciones pendientes (lee la conexión de `.env`).
 - `make seed-staff EMAIL=<email>` - da de alta como staff al usuario con ese email.
-- `make republish-suspensions [ARGS=--dry-run]` - vuelve a publicar las suspensiones vigentes para un consumidor nuevo.
+- `make republish-suspensions [ARGS=--dry-run]` - vuelve a publicar las suspensiones vigentes (de usuarios y de servidores) para un consumidor nuevo.
 
 ## Tests
 Cobertura mínima: 70 % (requisito del proyecto). El CI la verifica en cada PR, con Postgres y RabbitMQ de servicio.
@@ -120,6 +122,14 @@ Esquemas en [`discordia-docs`](https://github.com/discordia-grupo01/docs) (`asyn
 **Consistencia eventual**: `POST /v1/admin/users/{id}/suspension` suspende al usuario en admin al instante, pero identify, servers, messaging y voz lo bloquean recién cuando procesan el evento (normalmente menos de un segundo); con `DELETE`, igual al revés. Por esa ventana el usuario podría operar unos instantes; no se hace ninguna llamada síncrona para cerrarla.
 
 **Consume** (cola `admin.servers`, ack manual): `servers.server_updated`, `servers.server_deleted`, `servers.member_joined` y `servers.member_left`. Alimentan la réplica de servidores del listado. Ninguno trae versión, así que se ordenan por `occurred_at`: gana la foto de servidor más nueva y, por cada par servidor-usuario, el último evento de membresía. `server_deleted` deja el servidor marcado como borrado (un `server_updated` tardío no lo resucita) y descarta sus membresías. Un servidor no aparece hasta que llega su `server_updated`. Los mensajes inválidos se descartan y quedan en `consumed_events`; las fallas de base se reencolan.
+
+**Eliminación de servidores** (HU #68). `DELETE /v1/admin/servers/{id}` (con `confirm_name` en el cuerpo) publica `admin.server_deletion_requested`, con `server_id` y `version`, firmado igual que los de usuario. Es un **pedido**, no el hecho: admin solo registra el pedido (`deletion_requested_at` y `deletion_requested_by` en `servers`) y sube `moderation_version`; el borrado lo hace servers, que después publica `servers.server_deleted`, y recién entonces el servidor sale del listado. Mientras tanto (normalmente unos segundos) sigue apareciendo. Si el evento se pierde, el servidor no se borra y el pedido se puede repetir: cada uno lleva una `version` mayor y servers es idempotente.
+
+**Suspensión de servidores** (HU #69). `POST /v1/admin/servers/{id}/suspension` suspende el servidor y publica `admin.server_suspended`, con `server_id` y `version`, firmado igual que los demás; `DELETE` sobre la misma ruta publica `admin.server_reactivated` con la `version` siguiente. El servidor conserva todo su contenido, pero servers, messaging y voz lo bloquean al procesar el evento. El estado vive en `servers.suspended_at` (no hay columna `status`: se deriva de ahí) y `suspended_by` guarda quién lo hizo. Un servidor suspendido sigue en el listado con `suspended_at` informado y se filtra con `GET /v1/admin/servers?status=suspended|active`. La `version` es `moderation_version`, el mismo contador que usan los pedidos de eliminación: ordena suspender, reactivar y eliminar. Un `servers.server_updated` posterior no levanta la suspensión (solo toca nombre, dueño y fechas). Se puede pedir la eliminación de un servidor suspendido.
+
+**Consistencia eventual de los servidores**: la suspensión y la reactivación se ven en admin al instante, pero servers, messaging y voz las aplican al procesar el evento (normalmente menos de un segundo; la suspensión de usuarios medida en prod tardó entre 3 y 7 s). Por esa ventana alguien podría seguir usando el servidor unos instantes, y una eliminación tarda unos segundos en desaparecer del listado.
+
+**Orden de despliegue**: servers, messaging y voz tienen que consumir los eventos `admin.server_*` **antes** de que se despliegue este servicio. Si admin va primero, RabbitMQ descarta los eventos que no tienen una cola enlazada: un pedido de eliminación se pierde sin avisar (el servidor sigue visible y se puede repetir) y una suspensión no llega a nadie, aunque en admin figure suspendida. Para ese segundo caso, y para cualquier consumidor que se despliegue después, está `make republish-suspensions`.
 
 Hasta que identify publique `users.account_registered` y servers publique `servers.server_updated`, las tablas de usuarios y servidores solo se llenan en los tests.
 

@@ -42,6 +42,21 @@ func (s *StaffService) SeedByEmail(ctx context.Context, users UserLookup, email 
 	return id, nil
 }
 
+func (s *StaffService) SeedByEmailWithEvents(ctx context.Context, users UserLookup, email, secret string) (string, error) {
+	email = strings.TrimSpace(email)
+	if !strings.Contains(email, "@") {
+		return "", fmt.Errorf("%q no parece un email", email)
+	}
+	id, err := users.FindIDByEmail(ctx, email)
+	if err != nil {
+		return "", err
+	}
+	if err := s.SeedWithEvents(ctx, []string{id}, secret); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 func (s *StaffService) IsStaff(ctx context.Context, userID string) (bool, error) {
 	return s.repo.IsStaff(ctx, userID)
 }
@@ -53,9 +68,27 @@ func (s *StaffService) Seed(ctx context.Context, userIDs []string) error {
 		log.Printf("staff: STAFF_USER_IDS vacío, no se siembra ningún usuario")
 		return nil
 	}
+
 	if err := s.repo.AddAll(ctx, userIDs); err != nil {
 		return fmt.Errorf("sembrar staff: %w", err)
 	}
 	log.Printf("staff: %d usuario(s) sembrados como staff", len(userIDs))
 	return nil
+}
+
+// SeedWithEvents siembra staff y publica una foto firmada para que otros
+// servicios puedan mantener una proyección local de autorización.
+func (s *StaffService) SeedWithEvents(ctx context.Context, userIDs []string, secret string) error {
+	if len(userIDs) == 0 {
+		log.Printf("staff: STAFF_USER_IDS vacío, no se siembra ningún usuario")
+		return nil
+	}
+	if repo, ok := s.repo.(repository.StaffEventSeeder); ok {
+		if err := repo.AddAllWithEvents(ctx, userIDs, secret); err != nil {
+			return fmt.Errorf("sembrar staff y publicar eventos: %w", err)
+		}
+		log.Printf("staff: %d usuario(s) sembrados y publicados", len(userIDs))
+		return nil
+	}
+	return s.Seed(ctx, userIDs)
 }

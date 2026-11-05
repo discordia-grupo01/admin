@@ -14,6 +14,13 @@ import (
 
 func noEnv(string) string { return "" }
 
+func testEnv(key string) string {
+	if key == "ADMIN_EVENTS_HMAC_SECRET" {
+		return "test-admin-events-secret"
+	}
+	return os.Getenv(key)
+}
+
 func TestRunRequiresEmail(t *testing.T) {
 	for _, args := range [][]string{nil, {"--email", ""}, {"--email", "   "}} {
 		err := run(context.Background(), args, noEnv, &bytes.Buffer{})
@@ -53,7 +60,7 @@ func TestRunSeedsStaffByEmail(t *testing.T) {
 		id, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
-	getenv := os.Getenv // testutil.OpenDB ya validó que DATABASE_* apunta a una base de test
+	getenv := testEnv // testutil.OpenDB ya validó que DATABASE_* apunta a una base de test
 
 	for i := range 2 {
 		var out bytes.Buffer
@@ -79,7 +86,7 @@ func TestRunUnknownEmailExplainsWhatToDo(t *testing.T) {
 	db := testutil.OpenDB(t)
 	testutil.Truncate(t, db, "users", "staff_members")
 
-	err := run(context.Background(), []string{"--email", "nadie@example.com"}, os.Getenv, &bytes.Buffer{})
+	err := run(context.Background(), []string{"--email", "nadie@example.com"}, testEnv, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "STAFF_USER_IDS") {
 		t.Fatalf("el error debe orientar al usuario (réplica / STAFF_USER_IDS): %v", err)
 	}

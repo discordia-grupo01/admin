@@ -8,12 +8,14 @@ info:
     staff de la plataforma.
 
     **Estado**: implementados todos los endpoints: `/livez`, `/readyz`,
-    `GET /v1/admin/users` (#31), `GET /v1/admin/servers` (#32) y
-    `POST` / `DELETE /v1/admin/users/{id}/suspension` (#29 y #30).
+    `GET /v1/admin/users` (#31), `GET /v1/admin/servers` (#32),
+    `POST` / `DELETE /v1/admin/users/{id}/suspension` (#29 y #30),
+    `DELETE /v1/admin/servers/{id}` (#68) y
+    `POST` / `DELETE /v1/admin/servers/{id}/suspension` (#69).
 
-    **Consistencia eventual**: suspender o reactivar cambia el estado en admin
-    al instante y publica un evento; los demás servicios lo aplican a los pocos
-    instantes.
+    **Consistencia eventual**: suspender o reactivar (un usuario o un servidor)
+    cambia el estado en admin al instante y publica un evento; los demás
+    servicios lo aplican a los pocos instantes.
 servers:
   - url: /
 security:
@@ -163,11 +165,16 @@ paths:
       description: |
         Lista paginada, ordenada por fecha de creación descendente. Un servidor
         aparece cuando llega su alta a la réplica y desaparece cuando se elimina.
+        Los suspendidos siguen apareciendo, con `suspended_at` informado.
       parameters:
         - name: search
           in: query
           schema: { type: string, maxLength: 100 }
           description: Texto a buscar en el nombre del servidor (parcial, sin distinguir mayúsculas). Los caracteres `%`, `_` y `\` se toman como texto literal.
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, suspended] }
+          description: Deja solo los servidores activos o solo los suspendidos. Sin este parámetro se listan todos; otro valor da `400 INVALID_QUERY`.
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
       responses:
@@ -179,6 +186,118 @@ paths:
         "400": { $ref: "#/components/responses/InvalidQuery" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/servers/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Servers]
+      summary: Eliminar un servidor desde el backoffice (HU #68)
+      description: |
+        Pide la eliminación definitiva del servidor con todos sus canales,
+        mensajes y roles. El staff confirma escribiendo el nombre del servidor
+        (`confirm_name`), que se compara sin espacios en los bordes y distinguiendo
+        mayúsculas contra el nombre que admin tiene replicado.
+
+        Admin **no borra nada**: registra el pedido y, en la misma transacción,
+        deja escrito el evento `admin.server_deletion_requested` (firmado con
+        HMAC) para que lo publique el outbox. `servers` ejecuta el borrado y
+        avisa con `servers.server_deleted`; recién entonces el servidor
+        desaparece de `GET /v1/admin/servers`. Hasta ese momento (normalmente
+        unos segundos) sigue en el listado. Si el evento se pierde el servidor
+        no se borra y el pedido se puede repetir: cada pedido publica un evento
+        con una `version` mayor y `servers` es idempotente.
+
+        Es irreversible. Un `{id}` que no es un UUID se trata como servidor
+        inexistente. Sin `confirm_name` o con un nombre distinto no se hace nada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeleteServerRequest" }
+      responses:
+        "202":
+          description: Pedido aceptado; la eliminación se completa de forma asíncrona. Sin cuerpo.
+        "400":
+          description: El cuerpo no es un JSON válido (`INVALID_BODY`) o `confirm_name` falta o no es el nombre del servidor (`DELETE_CONFIRMATION_MISMATCH`, con `details.field = "confirm_name"`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: El servidor no existe, todavía no llegó a la réplica o ya fue eliminado (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v1/admin/servers/{id}/suspension:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Servers]
+      summary: Suspender un servidor (HU #69)
+      description: |
+        Bloquea el uso del servidor sin eliminarlo: ningún miembro, ni su owner,
+        puede leer, escribir, entrar a voz, invitar, editar, transferir ni
+        eliminarlo (salvo abandonarlo), pero su contenido se conserva. El estado
+        cambia en admin al instante y, en la misma transacción, queda escrito el
+        evento `admin.server_suspended` (firmado con HMAC) para que lo publique
+        el outbox; servers, messaging y voz lo aplican a los pocos instantes. El
+        servidor sigue en `GET /v1/admin/servers`, con `suspended_at` informado.
+
+        Se puede suspender un servidor de cualquier dueño. Un `{id}` que no es un
+        UUID se trata como servidor inexistente.
+      responses:
+        "200":
+          description: Servidor suspendido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: El servidor no existe, todavía no llegó a la réplica o ya fue eliminado (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: El servidor ya estaba suspendido (`SERVER_ALREADY_SUSPENDED`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    delete:
+      tags: [Servers]
+      summary: Levantar la suspensión de un servidor (HU #69)
+      description: |
+        Sus miembros recuperan el acceso normal. El servidor vuelve a estar
+        activo en admin al instante y, en la misma transacción, queda escrito el
+        evento `admin.server_reactivated` (firmado con HMAC), con una `version`
+        mayor que la de la suspensión. Los demás servicios dejan de bloquearlo
+        al procesarlo. Un `{id}` que no es un UUID se trata como servidor
+        inexistente.
+      responses:
+        "200":
+          description: Servidor reactivado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: El servidor no existe, todavía no llegó a la réplica o ya fue eliminado (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: El servidor no estaba suspendido (`SERVER_NOT_SUSPENDED`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 components:
   securitySchemes:
     bearerAuth:
@@ -258,7 +377,7 @@ components:
         offset: { type: integer }
     Server:
       type: object
-      required: [id, name, owner_id, owner_name, member_count, created_at]
+      required: [id, name, owner_id, owner_name, member_count, created_at, suspended_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -269,6 +388,11 @@ components:
           description: null si el perfil del dueño todavía no se replicó.
         member_count: { type: integer }
         created_at: { type: string, format: date-time }
+        suspended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Desde cuándo está suspendido (UTC). null si el servidor está activo.
     ServerList:
       type: object
       required: [servers, total, limit, offset]
@@ -279,3 +403,11 @@ components:
         total: { type: integer, description: Cantidad de servidores que cumplen el filtro. }
         limit: { type: integer }
         offset: { type: integer }
+    DeleteServerRequest:
+      type: object
+      required: [confirm_name]
+      properties:
+        confirm_name:
+          type: string
+          description: Nombre del servidor, tal como lo ve el staff. Sin espacios en los bordes; distingue mayúsculas.
+          example: Sala de prueba
