@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/discordia-grupo01/admin/internal/audit"
+	"github.com/discordia-grupo01/admin/internal/events/deadletter"
 	"github.com/discordia-grupo01/events-contract/broker"
 	"github.com/discordia-grupo01/events-contract/envelope"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -131,6 +132,12 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 
 	// Ack manual: el mensaje solo se confirma después de procesarlo, para no
 	// perder eventos ante una falla transitoria de la base.
+	retrier, err := deadletter.New(conn, queue.Name, deadletter.DefaultPolicy())
+	if err != nil {
+		return err
+	}
+	defer retrier.Close()
+
 	messages, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
 	if err != nil {
 		return err
@@ -144,11 +151,7 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 			if !ok {
 				return errors.New("canal de consumo cerrado")
 			}
-			if Process(ctx, c.handler, c.recorder, delivery.RoutingKey, delivery.Body) {
-				_ = delivery.Nack(false, true)
-			} else {
-				_ = delivery.Ack(false)
-			}
+			retrier.Settle(ctx, delivery, Process(ctx, c.handler, c.recorder, delivery.RoutingKey, delivery.Body))
 		}
 	}
 }
