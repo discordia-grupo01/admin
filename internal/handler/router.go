@@ -4,6 +4,7 @@ import (
 	"github.com/discordia-grupo01/admin/internal/apierr"
 	"github.com/discordia-grupo01/admin/internal/logging"
 	"github.com/discordia-grupo01/admin/internal/middleware"
+	"github.com/discordia-grupo01/admin/internal/telemetry"
 	"github.com/gin-gonic/gin"
 )
 
@@ -21,7 +22,7 @@ type Deps struct {
 // un JWT válido de un usuario que esté en staff_members.
 func NewRouter(deps Deps, registrars ...RouteRegistrar) *gin.Engine {
 	r := gin.New()
-	r.Use(logging.Middleware(), logging.Recovery())
+	r.Use(telemetry.Middleware(), logging.Middleware(), logging.Recovery())
 
 	r.GET("/livez", deps.Health.Livez)
 	r.GET("/readyz", deps.Health.Readyz)

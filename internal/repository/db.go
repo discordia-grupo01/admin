@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/discordia-grupo01/admin/internal/config"
+	"github.com/discordia-grupo01/admin/internal/telemetry"
 	_ "github.com/lib/pq"
 )
 
@@ -19,7 +20,7 @@ const (
 // Open abre el pool de conexiones y espera a que Postgres responda (en
 // docker-compose la base puede tardar unos segundos más que el servicio).
 func Open(ctx context.Context, cfg config.Database) (*sql.DB, error) {
-	db, err := sql.Open("postgres", cfg.DSN())
+	db, err := telemetry.OpenSQL("postgres", cfg.DSN())
 	if err != nil {
 		return nil, fmt.Errorf("abrir el driver de Postgres: %w", err)
 	}

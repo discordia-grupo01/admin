@@ -11,6 +11,8 @@ import (
 
 	"github.com/discordia-grupo01/events-contract/broker"
 	amqp "github.com/rabbitmq/amqp091-go"
+
+	"github.com/discordia-grupo01/admin/internal/telemetry"
 )
 
 // dialTimeout acota cuánto puede tardar un intento de conexión, para que un
@@ -41,7 +43,12 @@ func (p *AMQPPublisher) Publish(ctx context.Context, routingKey string, payload 
 	if err != nil {
 		return fmt.Errorf("serializar el payload: %w", err)
 	}
-	msg := amqp.Publishing{ContentType: "application/json", Body: body, DeliveryMode: amqp.Persistent}
+	msg := amqp.Publishing{
+		ContentType:  "application/json",
+		Body:         body,
+		DeliveryMode: amqp.Persistent,
+		Headers:      telemetry.InjectAMQP(ctx, nil),
+	}
 
 	ch, err := p.channel()
 	if err != nil {

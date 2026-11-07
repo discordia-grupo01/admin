@@ -12,13 +12,16 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+
+	"github.com/discordia-grupo01/admin/internal/telemetry"
 )
 
 // Event es un evento pendiente de publicar.
 type Event struct {
-	ID         string
-	RoutingKey string
-	Payload    []byte
+	ID          string
+	RoutingKey  string
+	Payload     []byte
+	Traceparent string
 }
 
 // Insert guarda un evento pendiente dentro de tx. Si falla, el caller tiene
@@ -29,9 +32,9 @@ func Insert(ctx context.Context, tx *sql.Tx, routingKey string, payload any) err
 		return fmt.Errorf("outbox: serializar el payload de %q: %w", routingKey, err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO outbox_events (id, routing_key, payload)
-		VALUES ($1, $2, $3)`,
-		uuid.NewString(), routingKey, body,
+		INSERT INTO outbox_events (id, routing_key, payload, traceparent)
+		VALUES ($1, $2, $3, NULLIF($4, ''))`,
+		uuid.NewString(), routingKey, body, telemetry.Traceparent(ctx),
 	); err != nil {
 		return fmt.Errorf("outbox: insertar el evento %q: %w", routingKey, err)
 	}

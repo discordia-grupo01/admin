@@ -33,7 +33,7 @@ func (s *PostgresStore) Dispatch(ctx context.Context, limit int, publish func(co
 	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, routing_key, payload
+		SELECT id, routing_key, payload, COALESCE(traceparent, '')
 		  FROM outbox_events
 		 WHERE published_at IS NULL
 		 ORDER BY seq
@@ -45,7 +45,7 @@ func (s *PostgresStore) Dispatch(ctx context.Context, limit int, publish func(co
 	var pending []Event
 	for rows.Next() {
 		var e Event
-		if err := rows.Scan(&e.ID, &e.RoutingKey, &e.Payload); err != nil {
+		if err := rows.Scan(&e.ID, &e.RoutingKey, &e.Payload, &e.Traceparent); err != nil {
 			_ = rows.Close()
 			return 0, fmt.Errorf("leer un evento pendiente: %w", err)
 		}
