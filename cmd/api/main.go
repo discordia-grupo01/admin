@@ -18,6 +18,7 @@ import (
 	"github.com/discordia-grupo01/admin/internal/outbox"
 	"github.com/discordia-grupo01/admin/internal/repository"
 	"github.com/discordia-grupo01/admin/internal/service"
+	"github.com/discordia-grupo01/admin/internal/telemetry"
 	"github.com/gin-gonic/gin"
 )
 
@@ -42,6 +43,16 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	shutdownTelemetry, err := telemetry.Setup(ctx, "admin")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		_ = shutdownTelemetry(flushCtx)
+	}()
 
 	db, err := repository.Open(ctx, cfg.Database)
 	if err != nil {
