@@ -4,9 +4,9 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
+	"github.com/discordia-grupo01/admin/internal/logging"
 	"github.com/discordia-grupo01/admin/internal/repository"
 )
 
@@ -65,14 +65,14 @@ func (s *StaffService) IsStaff(ctx context.Context, userID string) (bool, error)
 // se puede correr en cada arranque.
 func (s *StaffService) Seed(ctx context.Context, userIDs []string) error {
 	if len(userIDs) == 0 {
-		log.Printf("staff: STAFF_USER_IDS vacío, no se siembra ningún usuario")
+		logging.Warnf("staff: STAFF_USER_IDS vacío, no se siembra ningún usuario")
 		return nil
 	}
 
 	if err := s.repo.AddAll(ctx, userIDs); err != nil {
 		return fmt.Errorf("sembrar staff: %w", err)
 	}
-	log.Printf("staff: %d usuario(s) sembrados como staff", len(userIDs))
+	logging.Infof("staff: %d usuario(s) sembrados como staff", len(userIDs))
 	return nil
 }
 
@@ -80,14 +80,14 @@ func (s *StaffService) Seed(ctx context.Context, userIDs []string) error {
 // servicios puedan mantener una proyección local de autorización.
 func (s *StaffService) SeedWithEvents(ctx context.Context, userIDs []string, secret string) error {
 	if len(userIDs) == 0 {
-		log.Printf("staff: STAFF_USER_IDS vacío, no se siembra ningún usuario")
+		logging.Warnf("staff: STAFF_USER_IDS vacío, no se siembra ningún usuario")
 		return nil
 	}
 	if repo, ok := s.repo.(repository.StaffEventSeeder); ok {
 		if err := repo.AddAllWithEvents(ctx, userIDs, secret); err != nil {
 			return fmt.Errorf("sembrar staff y publicar eventos: %w", err)
 		}
-		log.Printf("staff: %d usuario(s) sembrados y publicados", len(userIDs))
+		logging.Infof("staff: %d usuario(s) sembrados y publicados", len(userIDs))
 		return nil
 	}
 	return s.Seed(ctx, userIDs)

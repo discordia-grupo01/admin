@@ -3,11 +3,12 @@ package handler
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/discordia-grupo01/admin/internal/logging"
 )
 
 const readyzTimeout = 3 * time.Second
@@ -42,7 +43,7 @@ func (h *HealthHandler) Readyz(c *gin.Context) {
 	failed := []string{}
 	for _, check := range h.checks {
 		if err := check.Fn(ctx); err != nil {
-			log.Printf("readyz: falló %s: %v", check.Name, err)
+			logging.Errorf("readyz: falló %s: %v", check.Name, err)
 			failed = append(failed, check.Name)
 		}
 	}

@@ -3,10 +3,10 @@ package handler
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 
 	"github.com/discordia-grupo01/admin/internal/apierr"
+	"github.com/discordia-grupo01/admin/internal/logging"
 	"github.com/discordia-grupo01/admin/internal/model"
 	"github.com/discordia-grupo01/admin/internal/service"
 	"github.com/gin-gonic/gin"
@@ -57,7 +57,7 @@ func (h *ServerHandler) List(c *gin.Context) {
 			apierr.InvalidQuery(c, "status", "El parámetro status debe ser active o suspended")
 			return
 		}
-		log.Printf("handler: no se pudo listar servidores: %v", err)
+		logging.Errorf("handler: no se pudo listar servidores: %v", err)
 		apierr.Internal(c)
 		return
 	}

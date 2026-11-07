@@ -3,12 +3,12 @@ package handler
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/discordia-grupo01/admin/internal/apierr"
+	"github.com/discordia-grupo01/admin/internal/logging"
 	"github.com/discordia-grupo01/admin/internal/model"
 	"github.com/discordia-grupo01/admin/internal/service"
 	"github.com/gin-gonic/gin"
@@ -72,7 +72,7 @@ func (h *UserHandler) List(c *gin.Context) {
 			apierr.InvalidQuery(c, "status", "El parámetro status debe ser active, pending o suspended")
 			return
 		}
-		log.Printf("handler: no se pudo listar usuarios: %v", err)
+		logging.Errorf("handler: no se pudo listar usuarios: %v", err)
 		apierr.Internal(c)
 		return
 	}

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +14,7 @@ import (
 	"github.com/discordia-grupo01/admin/internal/config"
 	"github.com/discordia-grupo01/admin/internal/events"
 	"github.com/discordia-grupo01/admin/internal/handler"
+	"github.com/discordia-grupo01/admin/internal/logging"
 	"github.com/discordia-grupo01/admin/internal/outbox"
 	"github.com/discordia-grupo01/admin/internal/repository"
 	"github.com/discordia-grupo01/admin/internal/service"
@@ -24,8 +24,10 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 func main() {
+	logging.MustSetup("admin")
+
 	if err := run(); err != nil {
-		log.Fatalf("admin: %v", err)
+		logging.Fatalf("admin: %v", err)
 	}
 }
 
@@ -46,7 +48,7 @@ func run() error {
 		return err
 	}
 	defer db.Close()
-	log.Println("conexión exitosa a PostgreSQL")
+	logging.Infof("conexión exitosa a PostgreSQL")
 
 	staff := service.NewStaffService(repository.NewStaffRepository(db))
 	if err := staff.SeedWithEvents(ctx, cfg.StaffUserIDs, cfg.AdminEventsHMACSecret); err != nil {
@@ -116,7 +118,7 @@ func run() error {
 
 	serverErr := make(chan error, 1)
 	go func() {
-		log.Printf("escuchando en %s", cfg.Addr())
+		logging.Infof("escuchando en %s", cfg.Addr())
 		serverErr <- server.ListenAndServe()
 	}()
 
@@ -126,13 +128,13 @@ func run() error {
 		background.Wait()
 		return err
 	case <-ctx.Done():
-		log.Println("señal de apagado recibida, cerrando…")
+		logging.Infof("señal de apagado recibida, cerrando…")
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Printf("apagado del servidor HTTP: %v", err)
+		logging.Errorf("apagado del servidor HTTP: %v", err)
 	}
 	background.Wait()
 	return nil
