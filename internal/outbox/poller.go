@@ -3,8 +3,9 @@ package outbox
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"time"
+
+	"github.com/discordia-grupo01/admin/internal/logging"
 )
 
 const batchSize = 20
@@ -47,10 +48,10 @@ func (p *Poller) Drain(ctx context.Context) {
 		return p.publisher.Publish(ctx, e.RoutingKey, json.RawMessage(e.Payload))
 	})
 	if err != nil {
-		log.Printf("outbox: falló el tick del poller: %v", err)
+		logging.Errorf("outbox: falló el tick del poller: %v", err)
 		return
 	}
 	if n > 0 {
-		log.Printf("outbox: %d evento(s) publicados", n)
+		logging.Infof("outbox: %d evento(s) publicados", n)
 	}
 }

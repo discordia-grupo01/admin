@@ -3,10 +3,10 @@ package handler
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 
 	"github.com/discordia-grupo01/admin/internal/apierr"
+	"github.com/discordia-grupo01/admin/internal/logging"
 	"github.com/discordia-grupo01/admin/internal/middleware"
 	"github.com/discordia-grupo01/admin/internal/model"
 	"github.com/discordia-grupo01/admin/internal/service"
@@ -48,7 +48,7 @@ func (h *SuspensionHandler) Suspend(c *gin.Context) {
 	case errors.Is(err, service.ErrUserAlreadySuspended):
 		apierr.Abort(c, http.StatusConflict, apierr.CodeUserAlreadySuspended, "El usuario ya está suspendido", nil)
 	default:
-		log.Printf("handler: no se pudo suspender al usuario %q: %v", c.Param("id"), err)
+		logging.Errorf("handler: no se pudo suspender al usuario %q: %v", c.Param("id"), err)
 		apierr.Internal(c)
 	}
 }
@@ -66,7 +66,7 @@ func (h *SuspensionHandler) Reactivate(c *gin.Context) {
 	case errors.Is(err, service.ErrUserNotSuspended):
 		apierr.Abort(c, http.StatusConflict, apierr.CodeUserNotSuspended, "El usuario no está suspendido", nil)
 	default:
-		log.Printf("handler: no se pudo reactivar al usuario %q: %v", c.Param("id"), err)
+		logging.Errorf("handler: no se pudo reactivar al usuario %q: %v", c.Param("id"), err)
 		apierr.Internal(c)
 	}
 }

@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/discordia-grupo01/admin/internal/audit"
 	"github.com/discordia-grupo01/admin/internal/events/deadletter"
+	"github.com/discordia-grupo01/admin/internal/logging"
 	"github.com/discordia-grupo01/events-contract/broker"
 	"github.com/discordia-grupo01/events-contract/envelope"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -48,19 +48,19 @@ func Process(ctx context.Context, handler Handler, recorder audit.Recorder, rout
 
 	err := handler.Handle(ctx, routingKey, body)
 	if err == nil {
-		log.Printf("events: procesado %q event_id=%s", routingKey, meta.EventID)
+		logging.Infof("events: procesado %q event_id=%s", routingKey, meta.EventID)
 		recorder.Record(ctx, audit.Entry{EventID: meta.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusProcessed})
 		return false
 	}
 
 	var discard *DiscardError
 	if errors.As(err, &discard) {
-		log.Printf("events: descartado %q event_id=%s (%s): %v", routingKey, meta.EventID, discard.Status, discard.Err)
+		logging.Warnf("events: descartado %q event_id=%s (%s): %v", routingKey, meta.EventID, discard.Status, discard.Err)
 		recorder.Record(ctx, audit.Entry{EventID: meta.EventID, RoutingKey: routingKey, RawBody: body, Status: discard.Status, Err: discard.Err})
 		return false
 	}
 
-	log.Printf("events: fallo transitorio procesando %q event_id=%s, reintentando: %v", routingKey, meta.EventID, err)
+	logging.Errorf("events: fallo transitorio procesando %q event_id=%s, reintentando: %v", routingKey, meta.EventID, err)
 	recorder.Record(ctx, audit.Entry{EventID: meta.EventID, RoutingKey: routingKey, RawBody: body, Status: audit.StatusPending, Err: err})
 	return true
 }
@@ -86,7 +86,7 @@ func (c *Consumer) Start(ctx context.Context) {
 
 	for ctx.Err() == nil {
 		if err := c.consumeOnce(ctx); err != nil {
-			log.Printf("events: conexión a RabbitMQ interrumpida (cola %s), reintentando en %s: %v", c.queue, backoff, err)
+			logging.Warnf("events: conexión a RabbitMQ interrumpida (cola %s), reintentando en %s: %v", c.queue, backoff, err)
 			select {
 			case <-ctx.Done():
 				return

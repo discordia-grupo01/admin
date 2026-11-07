@@ -2,9 +2,9 @@ package middleware
 
 import (
 	"context"
-	"log"
 
 	"github.com/discordia-grupo01/admin/internal/apierr"
+	"github.com/discordia-grupo01/admin/internal/logging"
 	"github.com/gin-gonic/gin"
 )
 
@@ -25,7 +25,7 @@ func RequireStaff(checker StaffChecker) gin.HandlerFunc {
 		}
 		ok, err := checker.IsStaff(c.Request.Context(), userID)
 		if err != nil {
-			log.Printf("middleware: no se pudo verificar staff user_id=%s: %v", userID, err)
+			logging.Errorf("middleware: no se pudo verificar staff user_id=%s: %v", userID, err)
 			apierr.Internal(c)
 			return
 		}
