@@ -26,6 +26,7 @@ const shutdownTimeout = 10 * time.Second
 
 func main() {
 	logging.MustSetup("admin")
+	defer logging.Flush()
 
 	if err := run(); err != nil {
 		logging.Fatalf("admin: %v", err)
