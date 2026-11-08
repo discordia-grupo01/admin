@@ -154,6 +154,7 @@ func (h *ServerEventsHandler) membership(ctx context.Context, body []byte, isMem
 		return Discard(audit.StatusDiscardedInvalid, errors.New("occurred_at vacío"))
 	}
 	return h.sync.ApplyMembership(ctx, repository.Membership{
+		EventID:    e.EventID,
 		ServerID:   serverID,
 		UserID:     userID,
 		IsMember:   isMember,

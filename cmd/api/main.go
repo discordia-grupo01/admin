@@ -103,6 +103,17 @@ func run() error {
 		serverConsumer.Start(ctx)
 	}()
 
+	// Y un tercero registra la actividad de mensajes del expediente. Sin cuerpo
+	// en la auditoría: el evento trae un extracto del texto, que admin no guarda.
+	activityConsumer := events.NewConsumer(cfg.RabbitMQURL, events.QueueActivity, events.ActivityBindings,
+		events.NewActivityEventsHandler(service.NewActivityService(repository.NewActivityRepository(db))),
+		audit.WithoutBody(audit.NewPostgresRecorder(db)))
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		activityConsumer.Start(ctx)
+	}()
+
 	// Suspender cambia el estado y deja el evento firmado en el outbox, que el
 	// poller de arriba publica.
 	suspensions := handler.NewSuspensionHandler(

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/discordia-grupo01/admin/internal/model"
+	"github.com/google/uuid"
 )
 
 // ServerFilter son los filtros del listado. Los campos vacíos no filtran.
@@ -29,6 +30,9 @@ type ServerSnapshot struct {
 
 // Membership es el último estado conocido de un usuario en un servidor.
 type Membership struct {
+	// EventID es el event_id del evento de origen y el id de la actividad que se
+	// registra. Si no es un UUID, la membresía se aplica igual pero sin actividad.
+	EventID    string
 	ServerID   string
 	UserID     string
 	IsMember   bool
@@ -107,6 +111,9 @@ func (r *postgresServerRepository) MarkDeleted(ctx context.Context, serverID str
 		`DELETE FROM moderation_actions WHERE server_id = $1 AND scope = 'server'`, serverID); err != nil {
 		return fmt.Errorf("borrar la moderación de %s: %w", serverID, err)
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_activity WHERE server_id = $1`, serverID); err != nil {
+		return fmt.Errorf("borrar la actividad de %s: %w", serverID, err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("borrar el servidor %s: %w", serverID, err)
 	}
@@ -114,15 +121,41 @@ func (r *postgresServerRepository) MarkDeleted(ctx context.Context, serverID str
 }
 
 func (r *postgresServerRepository) SetMembership(ctx context.Context, m Membership) error {
-	_, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("guardar la membresía de %s en %s: %w", m.UserID, m.ServerID, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // tras el Commit no hace nada
+
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO server_members (server_id, user_id, is_member, updated_at)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (server_id, user_id) DO UPDATE SET
 			is_member  = EXCLUDED.is_member,
 			updated_at = EXCLUDED.updated_at
 		WHERE server_members.updated_at < EXCLUDED.updated_at`,
-		m.ServerID, m.UserID, m.IsMember, m.OccurredAt)
-	if err != nil {
+		m.ServerID, m.UserID, m.IsMember, m.OccurredAt); err != nil {
+		return fmt.Errorf("guardar la membresía de %s en %s: %w", m.UserID, m.ServerID, err)
+	}
+
+	// La actividad es un hecho inmutable: se registra aunque el evento sea más
+	// viejo que el último aplicado, salvo que el servidor ya esté borrado (los
+	// member_left del propio borrado no deben dejar nada).
+	if id, err := uuid.Parse(m.EventID); err == nil {
+		kind := "left_server"
+		if m.IsMember {
+			kind = "joined_server"
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO user_activity (id, user_id, kind, server_id, occurred_at)
+			SELECT $1::uuid, $2::uuid, $3::text, $4::uuid, $5::timestamptz
+			 WHERE NOT EXISTS (SELECT 1 FROM servers WHERE server_id = $4::uuid AND deleted_at IS NOT NULL)
+			ON CONFLICT (id) DO NOTHING`,
+			id.String(), m.UserID, kind, m.ServerID, m.OccurredAt.UTC()); err != nil {
+			return fmt.Errorf("registrar la actividad de %s en %s: %w", m.UserID, m.ServerID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("guardar la membresía de %s en %s: %w", m.UserID, m.ServerID, err)
 	}
 	return nil
