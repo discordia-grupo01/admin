@@ -6,10 +6,11 @@ package audit
 import (
 	"context"
 	"database/sql"
-	"log"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/discordia-grupo01/admin/internal/logging"
 )
 
 type Status string
@@ -58,7 +59,7 @@ func (r *PostgresRecorder) Record(ctx context.Context, e Entry) {
 			VALUES ($1, NULL, $2, $3, $4, now(), $5)`,
 			uuid.NewString(), e.RoutingKey, string(e.RawBody), string(e.Status), errText,
 		); err != nil {
-			log.Printf("audit: no se pudo registrar la entrega de %q: %v", e.RoutingKey, err)
+			logging.Errorf("audit: no se pudo registrar la entrega de %q: %v", e.RoutingKey, err)
 		}
 		return
 	}
@@ -79,6 +80,6 @@ func (r *PostgresRecorder) Record(ctx context.Context, e Entry) {
 			error        = EXCLUDED.error`,
 		uuid.NewString(), e.EventID, e.RoutingKey, string(e.RawBody), string(e.Status), processedAt, errText,
 	); err != nil {
-		log.Printf("audit: no se pudo registrar event_id=%s: %v", e.EventID, err)
+		logging.Errorf("audit: no se pudo registrar event_id=%s: %v", e.EventID, err)
 	}
 }

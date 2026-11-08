@@ -3,8 +3,15 @@ package outbox
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/discordia-grupo01/admin/internal/logging"
+	"github.com/discordia-grupo01/admin/internal/telemetry"
 )
 
 const batchSize = 20
@@ -44,13 +51,26 @@ func (p *Poller) Start(ctx context.Context) {
 // tick; un error de base solo se loguea.
 func (p *Poller) Drain(ctx context.Context) {
 	n, err := p.store.Dispatch(ctx, batchSize, func(ctx context.Context, e Event) error {
-		return p.publisher.Publish(ctx, e.RoutingKey, json.RawMessage(e.Payload))
+		publishCtx := telemetry.ContextWithTraceparent(ctx, e.Traceparent)
+		publishCtx, span := otel.Tracer("github.com/discordia-grupo01/admin").Start(publishCtx, "outbox publish "+e.RoutingKey,
+			trace.WithSpanKind(trace.SpanKindProducer),
+			trace.WithAttributes(
+				attribute.String("messaging.system", "rabbitmq"),
+				attribute.String("messaging.destination.name", e.RoutingKey),
+			),
+		)
+		defer span.End()
+		err := p.publisher.Publish(publishCtx, e.RoutingKey, json.RawMessage(e.Payload))
+		if err != nil {
+			span.SetStatus(codes.Error, "publish failed")
+		}
+		return err
 	})
 	if err != nil {
-		log.Printf("outbox: falló el tick del poller: %v", err)
+		logging.Errorf("outbox: falló el tick del poller: %v", err)
 		return
 	}
 	if n > 0 {
-		log.Printf("outbox: %d evento(s) publicados", n)
+		logging.Infof("outbox: %d evento(s) publicados", n)
 	}
 }

@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 
 	"github.com/discordia-grupo01/admin/internal/apierr"
+	"github.com/discordia-grupo01/admin/internal/logging"
 	"github.com/discordia-grupo01/admin/internal/middleware"
 	"github.com/discordia-grupo01/admin/internal/model"
 	"github.com/discordia-grupo01/admin/internal/service"
@@ -59,7 +59,7 @@ func (h *ServerModerationHandler) Delete(c *gin.Context) {
 	err := h.moderator.Delete(c.Request.Context(), c.Param("id"), body.ConfirmName, staffID)
 	switch {
 	case err == nil:
-		log.Printf("handler: el staff %s pidió eliminar el servidor %s", staffID, c.Param("id"))
+		logging.Infof("handler: el staff %s pidió eliminar el servidor %s", staffID, c.Param("id"))
 		c.Status(http.StatusAccepted)
 	case errors.Is(err, service.ErrServerNotFound):
 		serverNotFound(c)
@@ -67,7 +67,7 @@ func (h *ServerModerationHandler) Delete(c *gin.Context) {
 		apierr.Abort(c, http.StatusBadRequest, apierr.CodeDeleteConfirmationMismatch,
 			"El nombre ingresado no coincide con el del servidor", map[string]any{"field": "confirm_name"})
 	default:
-		log.Printf("handler: no se pudo pedir la eliminación del servidor %q: %v", c.Param("id"), err)
+		logging.Errorf("handler: no se pudo pedir la eliminación del servidor %q: %v", c.Param("id"), err)
 		apierr.Internal(c)
 	}
 }
@@ -80,14 +80,14 @@ func (h *ServerModerationHandler) Suspend(c *gin.Context) {
 	s, err := h.moderator.Suspend(c.Request.Context(), c.Param("id"), staffID)
 	switch {
 	case err == nil:
-		log.Printf("handler: el staff %s suspendió el servidor %s", staffID, c.Param("id"))
+		logging.Infof("handler: el staff %s suspendió el servidor %s", staffID, c.Param("id"))
 		c.JSON(http.StatusOK, s)
 	case errors.Is(err, service.ErrServerNotFound):
 		serverNotFound(c)
 	case errors.Is(err, service.ErrServerAlreadySuspended):
 		apierr.Abort(c, http.StatusConflict, apierr.CodeServerAlreadySuspended, "El servidor ya está suspendido", nil)
 	default:
-		log.Printf("handler: no se pudo suspender el servidor %q: %v", c.Param("id"), err)
+		logging.Errorf("handler: no se pudo suspender el servidor %q: %v", c.Param("id"), err)
 		apierr.Internal(c)
 	}
 }
@@ -99,14 +99,14 @@ func (h *ServerModerationHandler) Reactivate(c *gin.Context) {
 	s, err := h.moderator.Reactivate(c.Request.Context(), c.Param("id"))
 	switch {
 	case err == nil:
-		log.Printf("handler: el staff %s reactivó el servidor %s", middleware.UserID(c), c.Param("id"))
+		logging.Infof("handler: el staff %s reactivó el servidor %s", middleware.UserID(c), c.Param("id"))
 		c.JSON(http.StatusOK, s)
 	case errors.Is(err, service.ErrServerNotFound):
 		serverNotFound(c)
 	case errors.Is(err, service.ErrServerNotSuspended):
 		apierr.Abort(c, http.StatusConflict, apierr.CodeServerNotSuspended, "El servidor no está suspendido", nil)
 	default:
-		log.Printf("handler: no se pudo reactivar el servidor %q: %v", c.Param("id"), err)
+		logging.Errorf("handler: no se pudo reactivar el servidor %q: %v", c.Param("id"), err)
 		apierr.Internal(c)
 	}
 }
