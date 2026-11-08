@@ -97,6 +97,16 @@ func (r *postgresServerRepository) MarkDeleted(ctx context.Context, serverID str
 	if _, err := tx.ExecContext(ctx, `DELETE FROM server_members WHERE server_id = $1`, serverID); err != nil {
 		return fmt.Errorf("borrar las membresías de %s: %w", serverID, err)
 	}
+	// Servers borra físicamente todo lo del servidor; admin hace lo mismo con su
+	// réplica. Las acciones de plataforma (suspensión, pedido de eliminación) se
+	// conservan: son el registro de lo que hizo el staff, no datos del servidor.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM reports WHERE server_id = $1`, serverID); err != nil {
+		return fmt.Errorf("borrar los reportes de %s: %w", serverID, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM moderation_actions WHERE server_id = $1 AND scope = 'server'`, serverID); err != nil {
+		return fmt.Errorf("borrar la moderación de %s: %w", serverID, err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("borrar el servidor %s: %w", serverID, err)
 	}
