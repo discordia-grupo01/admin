@@ -102,6 +102,12 @@ func (r *postgresServerModerationRepository) RequestDeletion(ctx context.Context
 		return fmt.Errorf("registrar el pedido de eliminación de %s: %w", serverID, err)
 	}
 
+	if err := insertPlatformAction(ctx, tx, platformAction{
+		Kind: ActionDeletionRequested, ServerID: serverID, ActorID: staffID, At: at,
+	}); err != nil {
+		return err
+	}
+
 	key, payload := event(version)
 	if err := outbox.Insert(ctx, tx, key, payload); err != nil {
 		return err
@@ -140,6 +146,12 @@ func (r *postgresServerModerationRepository) Suspend(ctx context.Context, server
 		return nil, err
 	}
 
+	if err := insertPlatformAction(ctx, tx, platformAction{
+		Kind: ActionSuspension, ServerID: serverID, ActorID: staffID, At: at,
+	}); err != nil {
+		return nil, err
+	}
+
 	key, payload := event(version)
 	if err := outbox.Insert(ctx, tx, key, payload); err != nil {
 		return nil, err
@@ -175,6 +187,10 @@ func (r *postgresServerModerationRepository) Reactivate(ctx context.Context, ser
 	}
 	s, err := getServer(ctx, tx, serverID)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := insertPlatformAction(ctx, tx, platformAction{Kind: ActionReactivation, ServerID: serverID}); err != nil {
 		return nil, err
 	}
 
