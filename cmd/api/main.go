@@ -114,6 +114,14 @@ func run() error {
 		activityConsumer.Start(ctx)
 	}()
 
+	// Una vez por hora borra la actividad que superó la retención.
+	activityPruner := service.NewActivityPruner(repository.NewActivityRepository(db), cfg.ActivityRetentionDays, time.Hour)
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		activityPruner.Start(ctx)
+	}()
+
 	// Suspender cambia el estado y deja el evento firmado en el outbox, que el
 	// poller de arriba publica.
 	suspensions := handler.NewSuspensionHandler(
