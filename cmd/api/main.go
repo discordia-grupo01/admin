@@ -125,6 +125,9 @@ func run() error {
 	serverModeration := handler.NewServerModerationHandler(
 		service.NewServerModerationService(repository.NewServerModerationRepository(db), cfg.AdminEventsHMACSecret))
 
+	// El expediente de investigación se arma solo con las réplicas locales.
+	dossier := handler.NewDossierHandler(service.NewDossierService(repository.NewDossierRepository(db)))
+
 	router := handler.NewRouter(handler.Deps{
 		JWTSecret: []byte(cfg.JWTSecret),
 		Staff:     staff,
@@ -132,7 +135,7 @@ func run() error {
 			handler.Check{Name: "postgres", Fn: db.PingContext},
 			handler.Check{Name: "rabbitmq", Fn: func(context.Context) error { return publisher.Ping() }},
 		),
-	}, users.Register, handler.NewServerHandler(serverService).Register, suspensions.Register, serverModeration.Register)
+	}, users.Register, handler.NewServerHandler(serverService).Register, suspensions.Register, serverModeration.Register, dossier.Register)
 
 	server := &http.Server{
 		Addr:              cfg.Addr(),

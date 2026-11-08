@@ -11,11 +11,21 @@ info:
     `GET /v1/admin/users` (#31), `GET /v1/admin/servers` (#32),
     `POST` / `DELETE /v1/admin/users/{id}/suspension` (#29 y #30),
     `DELETE /v1/admin/servers/{id}` (#68) y
-    `POST` / `DELETE /v1/admin/servers/{id}/suspension` (#69).
+    `POST` / `DELETE /v1/admin/servers/{id}/suspension` (#69) y
+    `GET /v1/admin/{users|servers}/{id}/dossier[/{section}]` (#81).
 
     **Consistencia eventual**: suspender o reactivar (un usuario o un servidor)
     cambia el estado en admin al instante y publica un evento; los demás
     servicios lo aplican a los pocos instantes.
+
+    **Expediente (#81)**: admin lo arma solo con datos locales, que le llegan
+    por eventos (réplicas), así que puede ir unos segundos por detrás de los
+    servicios de origen. Por minimización de datos nunca incluye el contenido de
+    un mensaje, quién hizo un reporte ni quién aplicó una acción de moderación.
+    La actividad de mensajes se conserva 90 días y empieza a registrarse desde
+    el despliegue de esta versión; por eso un reporte de un mensaje anterior o
+    más viejo que la retención no se puede atribuir a su autor
+    (`reported_user_id: null`).
 servers:
   - url: /
 security:
@@ -24,6 +34,7 @@ tags:
   - name: Health
   - name: Users
   - name: Servers
+  - name: Dossier
 paths:
   /livez:
     get:
@@ -298,6 +309,155 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v1/admin/users/{id}/dossier:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Dossier]
+      summary: Expediente de investigación de un usuario (HU #81)
+      description: |
+        Resumen para investigar a un usuario: su estado y fecha de registro, la
+        fecha de su última actividad y, de cada sección (`servers`, `activity`,
+        `reports`, `moderation`), el total y los 5 ítems más recientes. Para ver
+        más de una sección se pagina con `GET .../dossier/{section}`.
+
+        Las acciones de moderación mezclan las del staff de la plataforma
+        (`scope: platform`) con las de los moderadores de cada servidor
+        (`scope: server`). Los reportes incluyen los hechos contra el usuario y
+        los de mensajes que escribió.
+      responses:
+        "200":
+          description: Resumen del expediente
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserDossierSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: El usuario no existe, o todavía no llegó su registro (`USER_NOT_FOUND`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v1/admin/users/{id}/dossier/{section}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: section
+        in: path
+        required: true
+        schema: { type: string, enum: [servers, activity, reports, moderation] }
+    get:
+      tags: [Dossier]
+      summary: Una sección del expediente de un usuario, paginada (HU #81)
+      description: Ordenada de la más nueva a la más vieja.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Una página de la sección (puede ser vacía)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/DossierMembershipPage" }
+                  - { $ref: "#/components/schemas/DossierActivityPage" }
+                  - { $ref: "#/components/schemas/DossierReportPage" }
+                  - { $ref: "#/components/schemas/DossierModerationPage" }
+        "400":
+          description: La sección no existe (`INVALID_SECTION`) o `limit` / `offset` son inválidos (`INVALID_QUERY`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: El usuario no existe (`USER_NOT_FOUND`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v1/admin/servers/{id}/dossier:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Dossier]
+      summary: Expediente de investigación de un servidor (HU #81)
+      description: |
+        Resumen para investigar un servidor: sus datos (fecha de creación,
+        miembros, dueño, estado), los mensajes enviados en cada uno de los
+        últimos 7 días y, de reportes y moderación, el total y los 5 ítems más
+        recientes.
+
+        Los días de `messaging` son días **UTC**: un mensaje enviado a las 22 h
+        en UTC-3 cuenta para el día siguiente. Siempre vienen los 7 días, del
+        más viejo al más nuevo, con `messages: 0` donde no hubo actividad.
+
+        Un servidor eliminado responde `404`: servers lo borra de forma
+        permanente y admin descarta sus reportes, su actividad y las acciones de
+        sus moderadores. Se conservan las acciones del staff sobre el servidor
+        en el expediente de los usuarios afectados.
+      responses:
+        "200":
+          description: Resumen del expediente
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerDossierSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: El servidor no existe, todavía no llegó su alta o fue eliminado (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v1/admin/servers/{id}/dossier/{section}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: section
+        in: path
+        required: true
+        schema: { type: string, enum: [reports, moderation] }
+    get:
+      tags: [Dossier]
+      summary: Una sección del expediente de un servidor, paginada (HU #81)
+      description: |
+        Ordenada de la más nueva a la más vieja. En `moderation` hay acciones del
+        staff sobre el servidor (suspender, reactivar, pedir su eliminación) y
+        las de sus moderadores sobre sus miembros.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Una página de la sección (puede ser vacía)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/DossierReportPage" }
+                  - { $ref: "#/components/schemas/DossierModerationPage" }
+        "400":
+          description: La sección no existe (`INVALID_SECTION`) o `limit` / `offset` son inválidos (`INVALID_QUERY`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: El servidor no existe o fue eliminado (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 components:
   securitySchemes:
     bearerAuth:
@@ -411,3 +571,185 @@ components:
           type: string
           description: Nombre del servidor, tal como lo ve el staff. Sin espacios en los bordes; distingue mayúsculas.
           example: Sala de prueba
+    DossierMembership:
+      type: object
+      required: [server_id, server_name, joined_at]
+      properties:
+        server_id: { type: string, format: uuid }
+        server_name:
+          type: string
+          nullable: true
+          description: null si la foto del servidor todavía no se replicó.
+        joined_at: { type: string, format: date-time, description: Cuándo entró (UTC). }
+    DossierActivity:
+      type: object
+      required: [id, kind, description, server_id, occurred_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [message_sent, joined_server, left_server] }
+        description:
+          type: string
+          description: Texto listo para mostrar. Nunca incluye el contenido de un mensaje.
+          example: Envió un mensaje en #general de GamersHub
+        server_id: { type: string, format: uuid }
+        occurred_at: { type: string, format: date-time }
+    DossierReport:
+      type: object
+      required: [id, reason, created_at, kind, status, resolved_at, server_id, server_name, reported_user_id, reported_user_name]
+      description: |
+        No incluye quién hizo el reporte ni quién lo resolvió.
+      properties:
+        id: { type: string, format: uuid }
+        reason: { type: string }
+        created_at: { type: string, format: date-time }
+        kind: { type: string, enum: [user, message] }
+        status: { type: string, enum: [pending, resolved, dismissed] }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        server_id: { type: string, format: uuid }
+        server_name: { type: string, nullable: true }
+        reported_user_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            En un reporte de usuario, el reportado. En uno de mensaje, el autor
+            del mensaje; es null si admin no lo conoce (el mensaje es anterior
+            al despliegue, pasó la retención, o su evento todavía no llegó).
+        reported_user_name: { type: string, nullable: true }
+    DossierModerationAction:
+      type: object
+      required: [id, kind, applied_at, scope, server_id, server_name, target_user_id, target_user_name]
+      description: |
+        No incluye quién aplicó la acción.
+      properties:
+        id: { type: string, format: uuid }
+        kind:
+          type: string
+          enum: [suspension, reactivation, deletion_requested, ban, unban, kick, mute, unmute]
+          description: |
+            `suspension`, `reactivation` y `deletion_requested` son del staff
+            (`scope: platform`); el resto, de los moderadores de un servidor
+            (`scope: server`).
+        applied_at: { type: string, format: date-time }
+        scope: { type: string, enum: [platform, server] }
+        server_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: El servidor donde ocurrió; null en una acción del staff sobre un usuario.
+        server_name: { type: string, nullable: true }
+        target_user_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Sobre quién; null en una acción del staff sobre un servidor.
+        target_user_name: { type: string, nullable: true }
+    MessagingDay:
+      type: object
+      required: [date, messages]
+      properties:
+        date: { type: string, format: date, example: "2026-11-08", description: Día UTC. }
+        messages: { type: integer, minimum: 0 }
+    UserDossierSummary:
+      type: object
+      required: [user, last_activity_at, counts, latest]
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        last_activity_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: null si no hay actividad registrada.
+        counts:
+          type: object
+          required: [servers, activity, reports, moderation]
+          properties:
+            servers: { type: integer }
+            activity: { type: integer }
+            reports: { type: integer }
+            moderation: { type: integer }
+        latest:
+          type: object
+          required: [servers, activity, reports, moderation]
+          description: Hasta 5 ítems de cada sección, del más nuevo al más viejo.
+          properties:
+            servers:
+              type: array
+              items: { $ref: "#/components/schemas/DossierMembership" }
+            activity:
+              type: array
+              items: { $ref: "#/components/schemas/DossierActivity" }
+            reports:
+              type: array
+              items: { $ref: "#/components/schemas/DossierReport" }
+            moderation:
+              type: array
+              items: { $ref: "#/components/schemas/DossierModerationAction" }
+    ServerDossierSummary:
+      type: object
+      required: [server, messaging, counts, latest]
+      properties:
+        server: { $ref: "#/components/schemas/Server" }
+        messaging:
+          type: array
+          minItems: 7
+          maxItems: 7
+          description: Últimos 7 días UTC, del más viejo al más nuevo, con ceros.
+          items: { $ref: "#/components/schemas/MessagingDay" }
+        counts:
+          type: object
+          required: [reports, moderation]
+          properties:
+            reports: { type: integer }
+            moderation: { type: integer }
+        latest:
+          type: object
+          required: [reports, moderation]
+          description: Hasta 5 ítems de cada sección, del más nuevo al más viejo.
+          properties:
+            reports:
+              type: array
+              items: { $ref: "#/components/schemas/DossierReport" }
+            moderation:
+              type: array
+              items: { $ref: "#/components/schemas/DossierModerationAction" }
+    DossierMembershipPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DossierMembership" }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    DossierActivityPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DossierActivity" }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    DossierReportPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DossierReport" }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    DossierModerationPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DossierModerationAction" }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
