@@ -15,6 +15,7 @@ const (
 	CodeNotFound             = "NOT_FOUND"
 	CodeInternal             = "INTERNAL_ERROR"
 	CodeInvalidQuery         = "INVALID_QUERY"
+	CodeInvalidSection       = "INVALID_SECTION"
 	CodeUserNotFound         = "USER_NOT_FOUND"
 	CodeCannotSuspendStaff   = "CANNOT_SUSPEND_STAFF"
 	CodeUserAlreadySuspended = "USER_ALREADY_SUSPENDED"

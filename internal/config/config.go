@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,10 @@ const (
 	EnvProduction  = "production"
 
 	defaultOutboxPollInterval = 2 * time.Second
+	// defaultActivityRetentionDays es cuánto se conserva la actividad de los
+	// usuarios para el expediente. También es el límite hasta el que se puede
+	// atribuir un reporte de mensaje a su autor.
+	defaultActivityRetentionDays = 90
 )
 
 var schemaPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -46,6 +51,9 @@ type Config struct {
 	// StaffUserIDs se siembran en staff_members al arrancar.
 	StaffUserIDs       []string
 	OutboxPollInterval time.Duration
+	// ActivityRetentionDays es la antigüedad máxima, en días, de la actividad
+	// que se guarda para el expediente de investigación (HU #81).
+	ActivityRetentionDays int
 }
 
 // Addr es la dirección donde escucha el servidor HTTP.
@@ -125,6 +133,7 @@ func Load(getenv func(string) string) (Config, error) {
 		RabbitMQURL:           getenv("RABBITMQ_URL"),
 		AdminEventsHMACSecret: getenv("ADMIN_EVENTS_HMAC_SECRET"),
 		OutboxPollInterval:    defaultOutboxPollInterval,
+		ActivityRetentionDays: defaultActivityRetentionDays,
 	}
 
 	var errs []error
@@ -151,6 +160,15 @@ func Load(getenv func(string) string) (Config, error) {
 			errs = append(errs, fmt.Errorf("OUTBOX_POLL_INTERVAL %q inválido: usar una duración positiva como 2s", raw))
 		} else {
 			cfg.OutboxPollInterval = d
+		}
+	}
+
+	if raw := strings.TrimSpace(getenv("ACTIVITY_RETENTION_DAYS")); raw != "" {
+		days, err := strconv.Atoi(raw)
+		if err != nil || days <= 0 {
+			errs = append(errs, fmt.Errorf("ACTIVITY_RETENTION_DAYS %q inválido: usar un entero de días mayor a 0", raw))
+		} else {
+			cfg.ActivityRetentionDays = days
 		}
 	}
 
