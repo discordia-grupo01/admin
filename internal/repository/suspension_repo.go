@@ -104,6 +104,11 @@ func (r *postgresSuspensionRepository) Suspend(ctx context.Context, userID, staf
 	u.CreatedAt = u.CreatedAt.UTC()
 	u.SuspendedAt = &at
 
+	if err := insertPlatformAction(ctx, tx, platformAction{
+		Kind: ActionSuspension, TargetUserID: userID, ActorID: staffID, At: at,
+	}); err != nil {
+		return nil, err
+	}
 	key, payload := event(version)
 	if err := outbox.Insert(ctx, tx, key, payload); err != nil {
 		return nil, err
@@ -162,6 +167,9 @@ func (r *postgresSuspensionRepository) Reactivate(ctx context.Context, userID st
 	u.Name, u.Email = name.String, email.String
 	u.CreatedAt = u.CreatedAt.UTC()
 
+	if err := insertPlatformAction(ctx, tx, platformAction{Kind: ActionReactivation, TargetUserID: userID}); err != nil {
+		return nil, err
+	}
 	key, payload := event(version)
 	if err := outbox.Insert(ctx, tx, key, payload); err != nil {
 		return nil, err

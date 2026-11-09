@@ -95,11 +95,31 @@ func run() error {
 	// Y otro, la de servidores con los de servers.
 	serverService := service.NewServerService(repository.NewServerRepository(db))
 	serverConsumer := events.NewConsumer(cfg.RabbitMQURL, events.QueueServers, events.ServerBindings,
-		events.NewServerEventsHandler(serverService), audit.NewPostgresRecorder(db))
+		events.NewServerEventsHandler(serverService).WithDossier(service.NewDossierSyncService(repository.NewDossierSyncRepository(db))),
+		audit.NewPostgresRecorder(db))
 	background.Add(1)
 	go func() {
 		defer background.Done()
 		serverConsumer.Start(ctx)
+	}()
+
+	// Y un tercero registra la actividad de mensajes del expediente. Sin cuerpo
+	// en la auditoría: el evento trae un extracto del texto, que admin no guarda.
+	activityConsumer := events.NewConsumer(cfg.RabbitMQURL, events.QueueActivity, events.ActivityBindings,
+		events.NewActivityEventsHandler(service.NewActivityService(repository.NewActivityRepository(db))),
+		audit.WithoutBody(audit.NewPostgresRecorder(db)))
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		activityConsumer.Start(ctx)
+	}()
+
+	// Una vez por hora borra la actividad que superó la retención.
+	activityPruner := service.NewActivityPruner(repository.NewActivityRepository(db), cfg.ActivityRetentionDays, time.Hour)
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		activityPruner.Start(ctx)
 	}()
 
 	// Suspender cambia el estado y deja el evento firmado en el outbox, que el
@@ -113,6 +133,9 @@ func run() error {
 	serverModeration := handler.NewServerModerationHandler(
 		service.NewServerModerationService(repository.NewServerModerationRepository(db), cfg.AdminEventsHMACSecret))
 
+	// El expediente de investigación se arma solo con las réplicas locales.
+	dossier := handler.NewDossierHandler(service.NewDossierService(repository.NewDossierRepository(db)))
+
 	router := handler.NewRouter(handler.Deps{
 		JWTSecret: []byte(cfg.JWTSecret),
 		Staff:     staff,
@@ -120,7 +143,7 @@ func run() error {
 			handler.Check{Name: "postgres", Fn: db.PingContext},
 			handler.Check{Name: "rabbitmq", Fn: func(context.Context) error { return publisher.Ping() }},
 		),
-	}, users.Register, handler.NewServerHandler(serverService).Register, suspensions.Register, serverModeration.Register)
+	}, users.Register, handler.NewServerHandler(serverService).Register, suspensions.Register, serverModeration.Register, dossier.Register)
 
 	server := &http.Server{
 		Addr:              cfg.Addr(),

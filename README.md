@@ -1,8 +1,8 @@
 # discordia-admin
 
-Servicio de **Administración** de Discordia: la API del backoffice para el staff de la plataforma. Cubre las historias #29 (suspender usuario), #30 (reactivar usuario), #31 (listado de usuarios con filtros) y #32 (listado de servidores).
+Servicio de **Administración** de Discordia: la API del backoffice para el staff de la plataforma. Cubre las historias #29 (suspender usuario), #30 (reactivar usuario), #31 (listado de usuarios con filtros) y #32 (listado de servidores), y la optativa #81 (expediente de investigación de un usuario o un servidor).
 
-> **Estado**: implementados los cuatro endpoints de las historias (#29 a #32), la base del servicio (configuración, autenticación de staff, outbox, RabbitMQ, `/livez` y `/readyz`) y el alta de staff. Ver [`openapi.yaml`](openapi.yaml).
+> **Estado**: implementados los cuatro endpoints de las historias (#29 a #32), el expediente (#81), la base del servicio (configuración, autenticación de staff, outbox, RabbitMQ, `/livez` y `/readyz`) y el alta de staff. Ver [`openapi.yaml`](openapi.yaml).
 
 ## Stack
 - Lenguaje: Go
@@ -69,6 +69,7 @@ Cada evento sale con la `version` vigente del usuario, un `event_id` nuevo y su 
 | ADMIN_EVENTS_HMAC_SECRET | - | **Obligatoria.** Secreto con el que se firman los eventos `admin.*`, incluidos los cambios de staff. |
 | STAFF_USER_IDS | - | UUIDs de usuarios a sembrar como staff, separados por coma. |
 | OUTBOX_POLL_INTERVAL | 2s | Cada cuánto se publican los eventos pendientes. |
+| ACTIVITY_RETENTION_DAYS | 90 | Días que se conserva la actividad de los usuarios para el expediente. Entero mayor a 0; si es inválido el servicio no arranca. |
 
 `.env.example` solo trae la estructura (sin valores sensibles). Los valores reales van en tu propio `.env`, que nunca se sube (ya está en `.gitignore`). Si falta una variable obligatoria o un valor es inválido, el servicio no arranca y lo dice.
 
@@ -83,7 +84,7 @@ discordia-admin/
 │   ├── config/              carga y validación del entorno
 │   ├── apierr/              formato de error {error:{code,message,details}}
 │   ├── middleware/          autenticación (JWT) y autorización (staff)
-│   ├── handler/             router y handlers HTTP (health, usuarios, servidores, suspensión)
+│   ├── handler/             router y handlers HTTP (health, usuarios, servidores, suspensión, expediente)
 │   ├── service/             lógica de negocio
 │   ├── repository/          acceso a PostgreSQL
 │   ├── audit/               registro de eventos consumidos
@@ -121,7 +122,7 @@ Esquemas en [`discordia-docs`](https://github.com/discordia-grupo01/docs) (`asyn
 
 **Consistencia eventual**: `POST /v1/admin/users/{id}/suspension` suspende al usuario en admin al instante, pero identify, servers, messaging y voz lo bloquean recién cuando procesan el evento (normalmente menos de un segundo); con `DELETE`, igual al revés. Por esa ventana el usuario podría operar unos instantes; no se hace ninguna llamada síncrona para cerrarla.
 
-**Consume** (cola `admin.servers`, ack manual): `servers.server_updated`, `servers.server_deleted`, `servers.member_joined` y `servers.member_left`. Alimentan la réplica de servidores del listado. Ninguno trae versión, así que se ordenan por `occurred_at`: gana la foto de servidor más nueva y, por cada par servidor-usuario, el último evento de membresía. `server_deleted` deja el servidor marcado como borrado (un `server_updated` tardío no lo resucita) y descarta sus membresías. Un servidor no aparece hasta que llega su `server_updated`. Los mensajes inválidos se descartan y quedan en `consumed_events`; las fallas de base se reencolan.
+**Consume** (cola `admin.servers`, ack manual): `servers.server_updated`, `servers.server_deleted`, `servers.member_joined` y `servers.member_left`, más `servers.report_updated` y `servers.moderation_action_recorded` para el expediente (ver abajo). Los primeros alimentan la réplica de servidores del listado. Ninguno trae versión, así que se ordenan por `occurred_at`: gana la foto de servidor más nueva y, por cada par servidor-usuario, el último evento de membresía. `server_deleted` deja el servidor marcado como borrado (un `server_updated` tardío no lo resucita) y descarta sus membresías. Un servidor no aparece hasta que llega su `server_updated`. Los mensajes inválidos se descartan y quedan en `consumed_events`; las fallas de base se reencolan.
 
 **Eliminación de servidores** (HU #68). `DELETE /v1/admin/servers/{id}` (con `confirm_name` en el cuerpo) publica `admin.server_deletion_requested`, con `server_id` y `version`, firmado igual que los de usuario. Es un **pedido**, no el hecho: admin solo registra el pedido (`deletion_requested_at` y `deletion_requested_by` en `servers`) y sube `moderation_version`; el borrado lo hace servers, que después publica `servers.server_deleted`, y recién entonces el servidor sale del listado. Mientras tanto (normalmente unos segundos) sigue apareciendo. Si el evento se pierde, el servidor no se borra y el pedido se puede repetir: cada uno lleva una `version` mayor y servers es idempotente.
 
@@ -131,14 +132,41 @@ Esquemas en [`discordia-docs`](https://github.com/discordia-grupo01/docs) (`asyn
 
 **Orden de despliegue**: servers, messaging y voz tienen que consumir los eventos `admin.server_*` **antes** de que se despliegue este servicio. Si admin va primero, RabbitMQ descarta los eventos que no tienen una cola enlazada: un pedido de eliminación se pierde sin avisar (el servidor sigue visible y se puede repetir) y una suspensión no llega a nadie, aunque en admin figure suspendida. Para ese segundo caso, y para cualquier consumidor que se despliegue después, está `make republish-suspensions`.
 
+## Expediente de investigación (HU #81)
+
+Cuatro `GET` bajo `/v1/admin` (solo staff; sin token `401`, sin ser staff `403`):
+
+| Ruta | Qué devuelve |
+|---|---|
+| `/users/{id}/dossier` | Estado y registro del usuario, última actividad y, de `servers`, `activity`, `reports` y `moderation`, el total y los 5 más recientes |
+| `/users/{id}/dossier/{section}` | Una de esas secciones, paginada (`limit`, `offset`) |
+| `/servers/{id}/dossier` | Datos del servidor, mensajes de los últimos 7 días UTC (con ceros) y, de `reports` y `moderation`, el total y los 5 más recientes |
+| `/servers/{id}/dossier/{section}` | `reports` o `moderation`, paginada |
+
+Admin responde **solo con datos locales**: no llama a servers ni a messaging. Para eso mantiene tres réplicas más, alimentadas por eventos (ADR-024):
+
+| Tabla | Se llena con | Notas |
+|---|---|---|
+| `user_activity` | `messaging.message_created` (cola `admin.activity`), `servers.member_joined` y `member_left` | Guarda dónde y cuándo, **nunca el texto del mensaje**. Una tarea cada hora borra lo más viejo que `ACTIVITY_RETENTION_DAYS`. |
+| `reports` | `servers.report_updated` | Foto completa del reporte; gana el `occurred_at` más nuevo. No guarda quién reportó ni quién resolvió. |
+| `moderation_actions` | `servers.moderation_action_recorded` (acciones de moderadores, `scope = server`) y las propias del staff (`scope = platform`) | Las del staff se escriben en la misma transacción que la suspensión, la reactivación o el pedido de eliminación. No guarda quién la aplicó. |
+
+- **Autor de un reporte de mensaje**: se resuelve al consultar, cruzando `message_id` con `user_activity`. Si el mensaje es anterior al despliegue, pasó la retención, o su evento todavía no llegó, `reported_user_id` es `null` y el reporte aparece solo en el expediente del servidor. Si el evento llega después, se atribuye solo.
+- **Servidor eliminado**: servers lo borra de forma permanente, así que su expediente responde `404` y `server_deleted` purga en admin los reportes, la actividad y las acciones de moderadores de ese servidor. Se conservan las acciones del staff (`scope = platform`). Un evento que llegue después del borrado se descarta.
+- **Privacidad de los mensajes**: la cola `admin.activity` usa un recorder sin cuerpo (`audit.WithoutBody`): descarta `content_preview` y las menciones, no registra los eventos procesados en `consumed_events` y, de los descartados, no guarda el cuerpo. Un test recorre todas las tablas buscando el texto.
+- **Datos históricos** (migraciones): `000011` reconstruye las acciones del staff desde `outbox_events`, y `000014` las altas y bajas de servidores desde `consumed_events`. Los mensajes anteriores **no** se recuperan (volver a publicarlos re-dispararía los push de notifications): la actividad de mensajes arranca con el despliegue y la mensajería de un servidor se completa en 7 días. Servers publica además el backfill de reportes y de acciones de moderadores (`0034` y `0035`).
+- **Orden de despliegue**: admin tiene que estar **antes** que servers. Si servers corre sus migraciones de backfill sin la cola de admin enlazada, RabbitMQ descarta esos eventos; en ese caso se vuelve a ejecutar el `INSERT` de la migración de servers (admin los deduplica).
+- Los días de la mensajería son **UTC**.
+
 Hasta que identify publique `users.account_registered` y servers publique `servers.server_updated`, las tablas de usuarios y servidores solo se llenan en los tests.
 
 ## Deploy
 
-Cada push a `main` ejecuta `.github/workflows/deploy.yml` (también se puede lanzar a mano con *Run workflow*). Tiene dos jobs encadenados: si falla `migrate`, no se despliega.
+Cada push a `main` ejecuta `.github/workflows/ci.yml`, el mismo archivo del CI (también se puede lanzar a mano con *Run workflow*). Tiene tres jobs encadenados: si fallan los tests o `migrate`, no se despliega.
 
-1. **`migrate`**: aplica las migraciones pendientes sobre la base de Supabase con `make migrate` (golang-migrate corre solo las que faltan según `schema_migrations`). Falla con un mensaje claro si falta algún secret.
-2. **`deploy`**: entra por SSH a la VM de Oracle, actualiza el repo en `~/discordia/admin` y reconstruye el contenedor con `docker-compose.prod.yml`. Hace un smoke test de `/livez`.
+1. **`test`**: formato, `go build`, `go vet`, migraciones de la base de test y tests con una cobertura mínima del 70 %.
+2. **`migrate`**: aplica las migraciones pendientes sobre la base de Supabase con `make migrate` (golang-migrate corre solo las que faltan según `schema_migrations`). Falla con un mensaje claro si falta algún secret.
+3. **`deploy`**: entra por SSH a la VM de Oracle, actualiza el repo en `~/discordia/admin` y reconstruye el contenedor con `docker-compose.prod.yml`. Hace un smoke test de `/livez`.
 
 `docker-compose.prod.yml` levanta solo la API: la base es Supabase y RabbitMQ es el compartido del equipo (por Tailscale). Las variables salen del `.env` que vive en la VM, en `~/discordia/admin/.env`, y no se versiona.
 

@@ -101,6 +101,25 @@ func TestLoadOutboxPollInterval(t *testing.T) {
 	}
 }
 
+func TestLoadActivityRetentionDays(t *testing.T) {
+	cfg, err := Load(env(validEnv()))
+	if err != nil || cfg.ActivityRetentionDays != 90 {
+		t.Fatalf("por defecto: días = %d, err = %v, quería 90", cfg.ActivityRetentionDays, err)
+	}
+	m := validEnv()
+	m["ACTIVITY_RETENTION_DAYS"] = " 30 "
+	cfg, err = Load(env(m))
+	if err != nil || cfg.ActivityRetentionDays != 30 {
+		t.Fatalf("configurado: días = %d, err = %v, quería 30", cfg.ActivityRetentionDays, err)
+	}
+	for _, bad := range []string{"0", "-5", "abc", "1.5", "90d"} {
+		m["ACTIVITY_RETENTION_DAYS"] = bad
+		if _, err := Load(env(m)); err == nil || !strings.Contains(err.Error(), "ACTIVITY_RETENTION_DAYS") {
+			t.Errorf("ACTIVITY_RETENTION_DAYS=%q debería fallar al arrancar, err = %v", bad, err)
+		}
+	}
+}
+
 func TestLoadSchemaValidation(t *testing.T) {
 	m := validEnv()
 	m["DATABASE_SCHEMA"] = "admin"

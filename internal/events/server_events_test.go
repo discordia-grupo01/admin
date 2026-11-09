@@ -9,6 +9,8 @@ import (
 	"github.com/discordia-grupo01/admin/internal/audit"
 	"github.com/discordia-grupo01/admin/internal/repository"
 	"github.com/discordia-grupo01/events-contract/membership"
+	"github.com/discordia-grupo01/events-contract/moderation"
+	"github.com/discordia-grupo01/events-contract/reports"
 	"github.com/discordia-grupo01/events-contract/servers"
 )
 
@@ -142,6 +144,9 @@ func TestServerStoreErrorIsTransientNotDiscarded(t *testing.T) {
 	boom := errors.New("db caída")
 	body := `{"occurred_at":"2026-09-27T10:00:00Z","server_id":"` + serverID + `","user_id":"` + otherID + `","name":"n","owner_id":"` + otherID + `","created_at":"2026-09-26T14:30:00Z"}`
 	for _, key := range ServerBindings {
+		if key == reports.RoutingKeyReportUpdated || key == moderation.RoutingKeyModerationActionRecorded {
+			continue // tienen otro cuerpo y su propio test (dossier_events_test.go)
+		}
 		err := NewServerEventsHandler(&fakeServerSync{err: boom}).Handle(context.Background(), key, []byte(body))
 		if !errors.Is(err, boom) {
 			t.Fatalf("%s: err = %v, quería el error de la base", key, err)

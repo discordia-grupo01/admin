@@ -38,6 +38,29 @@ type Recorder interface {
 	Record(ctx context.Context, e Entry)
 }
 
+// bodyless envuelve un Recorder para eventos cuyo cuerpo no debe quedar en
+// ninguna tabla de admin (por ejemplo messaging.message_created, que trae un
+// extracto del texto del mensaje).
+type bodyless struct {
+	next Recorder
+}
+
+// WithoutBody devuelve un Recorder que no guarda el cuerpo de los eventos y
+// tampoco registra los procesados: su idempotencia la da el handler, y una fila
+// por mensaje en consumed_events no aportaría nada. Sí registra los descartes y
+// los pendientes, para no perder de vista qué falló, pero sin cuerpo.
+func WithoutBody(next Recorder) Recorder {
+	return &bodyless{next: next}
+}
+
+func (b *bodyless) Record(ctx context.Context, e Entry) {
+	if e.Status == StatusProcessed {
+		return
+	}
+	e.RawBody = nil
+	b.next.Record(ctx, e)
+}
+
 type PostgresRecorder struct {
 	db *sql.DB
 }
