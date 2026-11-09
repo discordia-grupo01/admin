@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main, develop]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -67,3 +68,106 @@ jobs:
             echo "::error::Cobertura ${COVERAGE}% por debajo del minimo requerido (70%)"
             exit 1
           fi
+
+  # Aplica las migraciones pendientes contra la base de produccion (Supabase)
+  # con `make migrate`: golang-migrate corre solo las que faltan segun la tabla
+  # schema_migrations. Va antes del deploy: el codigo nuevo arranca con el schema
+  # ya actualizado, y si una migracion falla no se despliega.
+  migrate:
+    needs: test
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: migrate-admin
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Aplicar migraciones en produccion
+        env:
+          # El host se llama PROD_DATABASE_HOST; el resto de los secrets de la
+          # base se llaman igual que la variable (DATABASE_PORT, DATABASE_NAME...).
+          DATABASE_HOST: ${{ secrets.PROD_DATABASE_HOST }}
+          DATABASE_PORT: ${{ secrets.DATABASE_PORT }}
+          DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
+          DATABASE_USER: ${{ secrets.DATABASE_USER }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          DATABASE_SSLMODE: ${{ secrets.DATABASE_SSLMODE }}
+          # Opcional: vacio = schema public (la base es solo de admin).
+          DATABASE_SCHEMA: ${{ secrets.DATABASE_SCHEMA }}
+        run: |
+          for v in DATABASE_HOST DATABASE_PORT DATABASE_NAME DATABASE_USER DATABASE_PASSWORD DATABASE_SSLMODE; do
+            if [ -z "${!v}" ]; then
+              SECRET="$v"; [ "$v" = "DATABASE_HOST" ] && SECRET="PROD_DATABASE_HOST"
+              echo "Falta el secret $SECRET (ver README, seccion Deploy)" >&2
+              exit 1
+            fi
+          done
+          # La password va dentro de la URL de conexion que arma `make migrate`:
+          # se codifica por si tiene caracteres especiales (@, :, /, #...) y se
+          # enmascara, porque codificada ya no coincide con el secret y GitHub no
+          # la ocultaria. `make -s` para que make no imprima el comando (con la URL).
+          ENCODED=$(jq -rn --arg p "$DATABASE_PASSWORD" '$p|@uri')
+          echo "::add-mask::$ENCODED"
+          DATABASE_PASSWORD="$ENCODED" make -s migrate
+
+  # Espera a `migrate`: no se despliega sin el schema al dia.
+  deploy:
+    needs: migrate
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    concurrency:
+      group: deploy-admin
+      cancel-in-progress: false
+    steps:
+      - name: Configurar SSH
+        env:
+          SSH_KEY: ${{ secrets.ADMIN_VM_SSH_KEY }}
+          HOST_KEY: ${{ secrets.ADMIN_VM_HOST_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Desplegar en la VM
+        env:
+          VM_HOST: ${{ secrets.ADMIN_VM_HOST }}
+          VM_USER: ${{ secrets.ADMIN_VM_USER }}
+          SHA: ${{ github.sha }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "$VM_USER@$VM_HOST" "SHA=$SHA bash -s" << 'REMOTE'
+          set -euo pipefail
+          cd ~/discordia/admin
+
+          git fetch origin main
+          git checkout main
+          git reset --hard "$SHA"
+
+          # La VM tiene 1 GB de RAM: compilar Go tarda, pero entra con el swap.
+          docker compose -f docker-compose.prod.yml up -d --build
+          docker image prune -f
+
+          # Smoke test: el proceso tiene que responder /livez.
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/livez > /dev/null; then
+              echo "deploy OK: $SHA"
+              curl -sS http://localhost:8080/readyz || true
+              echo
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "La API no respondió /livez después del deploy" >&2
+          docker compose -f docker-compose.prod.yml logs --tail=100 api >&2
+          exit 1
+          REMOTE
