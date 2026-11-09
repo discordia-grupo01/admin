@@ -1,0 +1,78 @@
+Starting...
+Gathering coverage... done in 883.737892ms
+      KILLED INVERT_BITWISE at activity_pruner.go:22:9
+ NOT COVERED INVERT_BITWISE at activity_service.go:16:9
+      KILLED INVERT_BITWISE at dossier_service.go:28:9
+       LIVED CONDITIONALS_NEGATION at activity_pruner.go:49:7
+       LIVED CONDITIONALS_BOUNDARY at activity_pruner.go:49:7
+      KILLED ARITHMETIC_BASE at activity_pruner.go:43:40
+      KILLED INVERT_NEGATIVES at activity_pruner.go:43:40
+      KILLED CONDITIONALS_NEGATION at activity_pruner.go:45:9
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:35:9
+      KILLED INVERT_BITWISE at dossier_service.go:70:9
+      KILLED INVERT_LOGICAL at dossier_service.go:50:35
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:50:40
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:61:9
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:50:11
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:65:9
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:71:94
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:75:9
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:79:90
+      KILLED INVERT_BITWISE at dossier_service.go:137:9
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:99:45
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:82:99
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:128:9
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:132:9
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:138:92
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:161:13
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:156:47
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:141:101
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:170:9
+ NOT COVERED INVERT_BITWISE at dossier_sync_service.go:16:9
+      KILLED ARITHMETIC_BASE at dossier_service.go:197:25
+      KILLED ARITHMETIC_BASE at dossier_service.go:199:24
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:173:11
+      KILLED INVERT_BITWISE at server_moderation_service.go:32:9
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:185:13
+      KILLED CONDITIONALS_NEGATION at dossier_service.go:191:21
+      KILLED CONDITIONALS_NEGATION at server_moderation_service.go:44:9
+      KILLED CONDITIONALS_NEGATION at server_moderation_service.go:63:9
+      KILLED CONDITIONALS_NEGATION at server_moderation_service.go:89:9
+      KILLED CONDITIONALS_NEGATION at server_moderation_service.go:77:9
+      KILLED INVERT_BITWISE at server_service.go:29:9
+      KILLED CONDITIONALS_NEGATION at server_moderation_service.go:103:9
+      KILLED CONDITIONALS_NEGATION at server_moderation_service.go:114:9
+      KILLED CONDITIONALS_NEGATION at server_moderation_service.go:152:71
+      KILLED CONDITIONALS_NEGATION at server_moderation_service.go:142:9
+      KILLED CONDITIONALS_NEGATION at server_moderation_service.go:128:9
+      KILLED INVERT_BITWISE at server_service.go:62:9
+      KILLED INVERT_BITWISE at staff_service.go:18:9
+ NOT COVERED CONDITIONALS_NEGATION at staff_service.go:51:9
+ NOT COVERED CONDITIONALS_NEGATION at staff_service.go:54:61
+      KILLED INVERT_LOGICAL at server_service.go:53:20
+      KILLED CONDITIONALS_NEGATION at server_service.go:53:14
+ NOT COVERED CONDITIONALS_NEGATION at staff_service.go:82:18
+ NOT COVERED CONDITIONALS_NEGATION at staff_service.go:87:62
+      KILLED CONDITIONALS_NEGATION at server_service.go:59:9
+      KILLED INVERT_BITWISE at suspension_service.go:32:9
+      KILLED CONDITIONALS_NEGATION at staff_service.go:36:9
+      KILLED CONDITIONALS_NEGATION at staff_service.go:67:18
+      KILLED CONDITIONALS_NEGATION at staff_service.go:39:43
+      KILLED CONDITIONALS_NEGATION at staff_service.go:72:45
+      KILLED CONDITIONALS_NEGATION at suspension_service.go:45:9
+      KILLED CONDITIONALS_NEGATION at suspension_service.go:62:9
+      KILLED INVERT_BITWISE at user_service.go:28:9
+      KILLED CONDITIONALS_NEGATION at suspension_service.go:73:9
+      KILLED CONDITIONALS_NEGATION at suspension_service.go:107:9
+      KILLED CONDITIONALS_NEGATION at suspension_service.go:117:69
+      KILLED CONDITIONALS_NEGATION at suspension_service.go:88:9
+      KILLED INVERT_BITWISE at user_service.go:66:9
+      KILLED INVERT_LOGICAL at user_service.go:57:20
+      KILLED CONDITIONALS_NEGATION at user_service.go:57:14
+      KILLED CONDITIONALS_NEGATION at user_service.go:63:9
+
+Mutation testing completed in 12 seconds 518 milliseconds
+Killed: 62, Lived: 2, Not covered: 6
+Timed out: 0, Not viable: 0, Skipped: 0
+Test efficacy: 96.88%
+Mutator coverage: 91.43%

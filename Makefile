@@ -1,4 +1,4 @@
-.PHONY: run test test-integration build migrate seed-staff republish-suspensions
+.PHONY: run test test-integration mutation build migrate seed-staff republish-suspensions
 
 -include .env
 export
@@ -18,6 +18,14 @@ run:
 # Tests unitarios. Los de integración se saltean solos si no hay servicios.
 test:
 	go test ./... -coverpkg=./internal/... -cover
+
+# Mutation testing de internal/service con gremlins (ver docs/mutation-testing).
+# Tarda unos segundos; no corre en el CI.
+mutation:
+	go clean -testcache
+	gremlins unleash ./internal/service --timeout-coefficient 30 --workers 4 \
+		--invert-assignments --invert-logical --invert-loopctrl --remove-self-assignments \
+		--invert-bitwise --invert-bwassign --output docs/mutation-testing/before.json
 
 build:
 	go build -o bin/api ./cmd/api
