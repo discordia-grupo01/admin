@@ -162,10 +162,11 @@ Hasta que identify publique `users.account_registered` y servers publique `serve
 
 ## Deploy
 
-Cada push a `main` ejecuta `.github/workflows/deploy.yml` (también se puede lanzar a mano con *Run workflow*). Tiene dos jobs encadenados: si falla `migrate`, no se despliega.
+Cada push a `main` ejecuta `.github/workflows/ci.yml`, el mismo archivo del CI (también se puede lanzar a mano con *Run workflow*). Tiene tres jobs encadenados: si fallan los tests o `migrate`, no se despliega.
 
-1. **`migrate`**: aplica las migraciones pendientes sobre la base de Supabase con `make migrate` (golang-migrate corre solo las que faltan según `schema_migrations`). Falla con un mensaje claro si falta algún secret.
-2. **`deploy`**: entra por SSH a la VM de Oracle, actualiza el repo en `~/discordia/admin` y reconstruye el contenedor con `docker-compose.prod.yml`. Hace un smoke test de `/livez`.
+1. **`test`**: formato, `go build`, `go vet`, migraciones de la base de test y tests con una cobertura mínima del 70 %.
+2. **`migrate`**: aplica las migraciones pendientes sobre la base de Supabase con `make migrate` (golang-migrate corre solo las que faltan según `schema_migrations`). Falla con un mensaje claro si falta algún secret.
+3. **`deploy`**: entra por SSH a la VM de Oracle, actualiza el repo en `~/discordia/admin` y reconstruye el contenedor con `docker-compose.prod.yml`. Hace un smoke test de `/livez`.
 
 `docker-compose.prod.yml` levanta solo la API: la base es Supabase y RabbitMQ es el compartido del equipo (por Tailscale). Las variables salen del `.env` que vive en la VM, en `~/discordia/admin/.env`, y no se versiona.
 
