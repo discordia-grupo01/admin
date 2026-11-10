@@ -3,6 +3,7 @@ package outbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/discordia-grupo01/admin/internal/logging"
 	"github.com/discordia-grupo01/admin/internal/telemetry"
+	"github.com/discordia-grupo01/events-contract/validate"
 )
 
 const batchSize = 20
@@ -60,6 +62,9 @@ func (p *Poller) Drain(ctx context.Context) {
 			),
 		)
 		defer span.End()
+		if verr := validate.Validate(e.RoutingKey, e.Payload); verr != nil && !errors.Is(verr, validate.ErrUnknownEvent) {
+			logging.Warnf("outbox: %q (id=%s) no cumple el contrato de eventos: %v", e.RoutingKey, e.ID, verr)
+		}
 		err := p.publisher.Publish(publishCtx, e.RoutingKey, json.RawMessage(e.Payload))
 		if err != nil {
 			span.SetStatus(codes.Error, "publish failed")
