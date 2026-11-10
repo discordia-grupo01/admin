@@ -102,6 +102,7 @@ discordia-admin/
 - `make run` - corre el servicio localmente.
 - `make test` - tests unitarios con cobertura. Los de integración se saltean solos si no hay servicios.
 - `make test-integration` - además corre los tests de integración contra el Postgres y el RabbitMQ de docker-compose (usa una base aparte, `discordia_admin_test`, porque esos tests vacían tablas).
+- `make mutation` - mutation testing de `internal/service` (unos segundos; ver [`docs/mutation-testing`](docs/mutation-testing/README.md)).
 - `make build` - compila el binario en `bin/api`.
 - `make migrate` - aplica las migraciones pendientes (lee la conexión de `.env`).
 - `make seed-staff EMAIL=<email>` - da de alta como staff al usuario con ese email.
