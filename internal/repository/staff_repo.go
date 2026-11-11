@@ -19,6 +19,14 @@ type StaffRepository interface {
 	AddAll(ctx context.Context, userIDs []string) error
 }
 
+type StaffAudience interface {
+	StaffUserIDs(ctx context.Context) ([]string, error)
+}
+
+func NewStaffAudience(db *sql.DB) StaffAudience {
+	return &postgresStaffRepository{db: db}
+}
+
 type StaffEventSeeder interface {
 	AddAllWithEvents(ctx context.Context, userIDs []string, secret string) error
 }
@@ -90,4 +98,21 @@ func signStaffEvent(secret, routingKey, eventID, userID string, occurredAt time.
 		routingKey, eventID, userID, occurredAt.UTC().Format(time.RFC3339Nano),
 	}, "\n")))
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func (r *postgresStaffRepository) StaffUserIDs(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT user_id::text FROM staff_members ORDER BY created_at`)
+	if err != nil {
+		return nil, fmt.Errorf("listar el staff: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("leer el staff: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

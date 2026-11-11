@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/discordia-grupo01/admin/internal/apierr"
+	"github.com/discordia-grupo01/admin/internal/changes"
 	"github.com/discordia-grupo01/admin/internal/logging"
 	"github.com/discordia-grupo01/admin/internal/middleware"
 	"github.com/discordia-grupo01/admin/internal/telemetry"
@@ -13,6 +14,7 @@ import (
 type RouteRegistrar func(admin *gin.RouterGroup)
 
 type Deps struct {
+	Changes   changes.Notifier
 	JWTSecret []byte
 	Staff     middleware.StaffChecker
 	Health    *HealthHandler
@@ -28,6 +30,9 @@ func NewRouter(deps Deps, registrars ...RouteRegistrar) *gin.Engine {
 	r.GET("/readyz", deps.Health.Readyz)
 
 	admin := r.Group("/v1/admin", middleware.RequireAuth(deps.JWTSecret), middleware.RequireStaff(deps.Staff))
+	if deps.Changes != nil {
+		admin.Use(middleware.NotifyChanges(deps.Changes))
+	}
 	for _, register := range registrars {
 		register(admin)
 	}

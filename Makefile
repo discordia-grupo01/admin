@@ -1,4 +1,4 @@
-.PHONY: run test test-integration mutation build migrate seed-staff republish-suspensions
+.PHONY: run test test-integration mutation build migrate openapi seed-staff republish-suspensions
 
 -include .env
 export
@@ -29,6 +29,9 @@ mutation:
 
 build:
 	go build -o bin/api ./cmd/api
+
+openapi:
+	npx --yes swagger-cli@4.0.4 validate openapi.yaml
 
 # Aplica las migraciones pendientes. Lee la conexión de .env, así el mismo
 # target sirve para el Postgres local (defaults de arriba) y para Supabase
