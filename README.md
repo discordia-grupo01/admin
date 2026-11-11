@@ -104,6 +104,7 @@ discordia-admin/
 - `make test-integration` - además corre los tests de integración contra el Postgres y el RabbitMQ de docker-compose (usa una base aparte, `discordia_admin_test`, porque esos tests vacían tablas).
 - `make mutation` - mutation testing de `internal/service` (unos segundos; ver [`docs/mutation-testing`](docs/mutation-testing/README.md)).
 - `make build` - compila el binario en `bin/api`.
+- `make openapi` - valida el contrato comprometido en `openapi.yaml`.
 - `make migrate` - aplica las migraciones pendientes (lee la conexión de `.env`).
 - `make seed-staff EMAIL=<email>` - da de alta como staff al usuario con ese email.
 - `make republish-suspensions [ARGS=--dry-run]` - vuelve a publicar las suspensiones vigentes (de usuarios y de servidores) para un consumidor nuevo.

@@ -57,6 +57,8 @@ jobs:
 
       - run: go build ./...
       - run: go vet ./...
+      - name: Validar openapi.yaml
+        run: make openapi
       - name: Migrar la base de test
         run: make migrate
       - name: Tests (con cobertura)
