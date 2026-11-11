@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/discordia-grupo01/admin/internal/changes"
 	"net/http"
 	"os"
 	"os/signal"
@@ -80,12 +81,14 @@ func run() error {
 		poller.Start(ctx)
 	}()
 
+	changePublisher := changes.NewPublisher(changes.NewOutboxSink(db), repository.NewStaffAudience(db), 3*time.Second)
+
 	userService := service.NewUserService(repository.NewUserRepository(db))
 	users := handler.NewUserHandler(userService)
 
 	// El consumer alimenta la réplica de usuarios con los eventos de identify.
 	userConsumer := events.NewConsumer(cfg.RabbitMQURL, events.QueueUsers, events.UserBindings,
-		events.NewUserEventsHandler(userService), audit.NewPostgresRecorder(db))
+		changes.Notifying(events.NewUserEventsHandler(userService), changePublisher), audit.NewPostgresRecorder(db))
 	background.Add(1)
 	go func() {
 		defer background.Done()
@@ -95,7 +98,7 @@ func run() error {
 	// Y otro, la de servidores con los de servers.
 	serverService := service.NewServerService(repository.NewServerRepository(db))
 	serverConsumer := events.NewConsumer(cfg.RabbitMQURL, events.QueueServers, events.ServerBindings,
-		events.NewServerEventsHandler(serverService).WithDossier(service.NewDossierSyncService(repository.NewDossierSyncRepository(db))),
+		changes.Notifying(events.NewServerEventsHandler(serverService).WithDossier(service.NewDossierSyncService(repository.NewDossierSyncRepository(db))), changePublisher),
 		audit.NewPostgresRecorder(db))
 	background.Add(1)
 	go func() {
@@ -106,7 +109,7 @@ func run() error {
 	// Y un tercero registra la actividad de mensajes del expediente. Sin cuerpo
 	// en la auditoría: el evento trae un extracto del texto, que admin no guarda.
 	activityConsumer := events.NewConsumer(cfg.RabbitMQURL, events.QueueActivity, events.ActivityBindings,
-		events.NewActivityEventsHandler(service.NewActivityService(repository.NewActivityRepository(db))),
+		changes.Notifying(events.NewActivityEventsHandler(service.NewActivityService(repository.NewActivityRepository(db))), changePublisher),
 		audit.WithoutBody(audit.NewPostgresRecorder(db)))
 	background.Add(1)
 	go func() {
@@ -139,6 +142,7 @@ func run() error {
 	router := handler.NewRouter(handler.Deps{
 		JWTSecret: []byte(cfg.JWTSecret),
 		Staff:     staff,
+		Changes:   changePublisher,
 		Health: handler.NewHealthHandler(
 			handler.Check{Name: "postgres", Fn: db.PingContext},
 			handler.Check{Name: "rabbitmq", Fn: func(context.Context) error { return publisher.Ping() }},

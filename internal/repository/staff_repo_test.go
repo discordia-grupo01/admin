@@ -55,3 +55,27 @@ func TestAddAllRejectsInvalidUUID(t *testing.T) {
 		t.Error("AddAll debe ser atómico: no debería haber quedado ningún staff")
 	}
 }
+
+func TestStaffAudienceListsEveryStaffMember(t *testing.T) {
+	db := testutil.OpenDB(t)
+	testutil.Truncate(t, db, "staff_members")
+	ctx := context.Background()
+	audience := repository.NewStaffAudience(db)
+
+	if ids, err := audience.StaffUserIDs(ctx); err != nil || len(ids) != 0 {
+		t.Fatalf("sin staff: ids=%v err=%v", ids, err)
+	}
+
+	if err := repository.NewStaffRepository(db).AddAll(ctx, []string{staffA, staffB}); err != nil {
+		t.Fatalf("AddAll: %v", err)
+	}
+
+	ids, err := audience.StaffUserIDs(ctx)
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("ids=%v err=%v, quería los dos", ids, err)
+	}
+	seen := map[string]bool{ids[0]: true, ids[1]: true}
+	if !seen[staffA] || !seen[staffB] {
+		t.Errorf("ids=%v, faltan miembros", ids)
+	}
+}
