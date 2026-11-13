@@ -86,9 +86,16 @@ func run() error {
 	userService := service.NewUserService(repository.NewUserRepository(db))
 	users := handler.NewUserHandler(userService)
 
+	// Las solicitudes de recuperación de cuenta llegan de identify por la misma
+	// cola que los usuarios; aprobar o rechazar deja el evento firmado en el
+	// outbox para que identify lo aplique.
+	recoveryRepo := repository.NewRecoveryRequestRepository(db)
+	recoveryService := service.NewRecoveryService(recoveryRepo, cfg.AdminEventsHMACSecret)
+	recoveryRequests := handler.NewRecoveryHandler(recoveryService)
+
 	// El consumer alimenta la réplica de usuarios con los eventos de identify.
 	userConsumer := events.NewConsumer(cfg.RabbitMQURL, events.QueueUsers, events.UserBindings,
-		changes.Notifying(events.NewUserEventsHandler(userService), changePublisher), audit.NewPostgresRecorder(db))
+		changes.Notifying(events.NewUserEventsHandler(userService).WithRecoveryRequests(recoveryService), changePublisher), audit.NewPostgresRecorder(db))
 	background.Add(1)
 	go func() {
 		defer background.Done()
@@ -137,7 +144,7 @@ func run() error {
 		service.NewServerModerationService(repository.NewServerModerationRepository(db), cfg.AdminEventsHMACSecret))
 
 	// El expediente de investigación se arma solo con las réplicas locales.
-	dossier := handler.NewDossierHandler(service.NewDossierService(repository.NewDossierRepository(db)))
+	dossier := handler.NewDossierHandler(service.NewDossierService(repository.NewDossierRepository(db)).WithRecoveryRequests(recoveryRepo))
 
 	router := handler.NewRouter(handler.Deps{
 		JWTSecret: []byte(cfg.JWTSecret),
@@ -147,7 +154,7 @@ func run() error {
 			handler.Check{Name: "postgres", Fn: db.PingContext},
 			handler.Check{Name: "rabbitmq", Fn: func(context.Context) error { return publisher.Ping() }},
 		),
-	}, users.Register, handler.NewServerHandler(serverService).Register, suspensions.Register, serverModeration.Register, dossier.Register)
+	}, users.Register, handler.NewServerHandler(serverService).Register, suspensions.Register, serverModeration.Register, dossier.Register, recoveryRequests.Register)
 
 	server := &http.Server{
 		Addr:              cfg.Addr(),

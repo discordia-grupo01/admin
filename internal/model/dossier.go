@@ -8,6 +8,9 @@ const (
 	SectionActivity   = "activity"
 	SectionReports    = "reports"
 	SectionModeration = "moderation"
+	// SectionRecoveryRequests son las solicitudes de recuperación de cuenta
+	// (sección "Seguridad de la cuenta"). Solo existe en el expediente de usuario.
+	SectionRecoveryRequests = "recovery_requests"
 )
 
 // DossierPreviewSize es cuántos ítems de cada sección trae el resumen.
@@ -81,6 +84,16 @@ type DossierModerationAction struct {
 	TargetUserName *string   `json:"target_user_name"`
 }
 
+// DossierRecoveryRequest es una solicitud de recuperación de cuenta del
+// usuario. No es una acción de moderación: va en su propia sección.
+type DossierRecoveryRequest struct {
+	ID          string                `json:"id"`
+	Status      RecoveryRequestStatus `json:"status"`
+	RequestedAt time.Time             `json:"requested_at"`
+	ResolvedAt  *time.Time            `json:"resolved_at"`
+	ResolvedBy  *StaffRef             `json:"resolved_by"`
+}
+
 // MessagingDay son los mensajes enviados en un servidor en un día UTC.
 type MessagingDay struct {
 	Date     string `json:"date"` // YYYY-MM-DD
@@ -88,17 +101,19 @@ type MessagingDay struct {
 }
 
 type UserDossierCounts struct {
-	Servers    int `json:"servers"`
-	Activity   int `json:"activity"`
-	Reports    int `json:"reports"`
-	Moderation int `json:"moderation"`
+	Servers          int `json:"servers"`
+	Activity         int `json:"activity"`
+	Reports          int `json:"reports"`
+	Moderation       int `json:"moderation"`
+	RecoveryRequests int `json:"recovery_requests"`
 }
 
 type UserDossierLatest struct {
-	Servers    []DossierMembership       `json:"servers"`
-	Activity   []DossierActivity         `json:"activity"`
-	Reports    []DossierReport           `json:"reports"`
-	Moderation []DossierModerationAction `json:"moderation"`
+	Servers          []DossierMembership       `json:"servers"`
+	Activity         []DossierActivity         `json:"activity"`
+	Reports          []DossierReport           `json:"reports"`
+	Moderation       []DossierModerationAction `json:"moderation"`
+	RecoveryRequests []DossierRecoveryRequest  `json:"recovery_requests"`
 }
 
 // UserDossierSummary es el resumen del expediente de un usuario.

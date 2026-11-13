@@ -12,11 +12,14 @@ info:
     `POST` / `DELETE /v1/admin/users/{id}/suspension` (#29 y #30),
     `DELETE /v1/admin/servers/{id}` (#68) y
     `POST` / `DELETE /v1/admin/servers/{id}/suspension` (#69) y
-    `GET /v1/admin/{users|servers}/{id}/dossier[/{section}]` (#81).
+    `GET /v1/admin/{users|servers}/{id}/dossier[/{section}]` (#81) y
+    `/v1/admin/recovery-requests` (recuperación de cuenta sin segundo factor).
 
     **Consistencia eventual**: suspender o reactivar (un usuario o un servidor)
     cambia el estado en admin al instante y publica un evento; los demás
-    servicios lo aplican a los pocos instantes.
+    servicios lo aplican a los pocos instantes. Lo mismo al aprobar o rechazar
+    una solicitud de recuperación de cuenta: identify desactiva el 2FA (o solo
+    avisa al usuario) cuando procesa el evento.
 
     **Expediente (#81)**: admin lo arma solo con datos locales, que le llegan
     por eventos (réplicas), así que puede ir unos segundos por detrás de los
@@ -35,6 +38,7 @@ tags:
   - name: Users
   - name: Servers
   - name: Dossier
+  - name: Recovery
 paths:
   /livez:
     get:
@@ -350,7 +354,7 @@ paths:
       - name: section
         in: path
         required: true
-        schema: { type: string, enum: [servers, activity, reports, moderation] }
+        schema: { type: string, enum: [servers, activity, reports, moderation, recovery_requests] }
     get:
       tags: [Dossier]
       summary: Una sección del expediente de un usuario, paginada (HU #81)
@@ -369,6 +373,7 @@ paths:
                   - { $ref: "#/components/schemas/DossierActivityPage" }
                   - { $ref: "#/components/schemas/DossierReportPage" }
                   - { $ref: "#/components/schemas/DossierModerationPage" }
+                  - { $ref: "#/components/schemas/DossierRecoveryRequestPage" }
         "400":
           description: La sección no existe (`INVALID_SECTION`) o `limit` / `offset` son inválidos (`INVALID_QUERY`)
           content:
@@ -458,6 +463,104 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /v1/admin/recovery-requests:
+    get:
+      tags: [Recovery]
+      summary: Listar solicitudes de recuperación de cuenta
+      description: |
+        Pedidos de usuarios con 2FA activo que perdieron la app autenticadora y
+        todos sus códigos de recuperación. Llegan de identify por evento
+        (`users.account_recovery_requested`). Lista paginada, de la más reciente
+        a la más vieja. `search` busca por email o nombre del usuario (parcial,
+        sin distinguir mayúsculas). El `total` con `status=pending` sirve de
+        contador de pendientes.
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 100 }
+          description: Texto a buscar en el email o el nombre del usuario. Los caracteres `%`, `_` y `\` se toman como texto literal.
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/RecoveryRequestStatus" }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Solicitudes que cumplen los filtros (puede ser una lista vacía)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryRequestList" }
+        "400": { $ref: "#/components/responses/InvalidQuery" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/admin/recovery-requests/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Recovery]
+      summary: Detalle de una solicitud de recuperación de cuenta
+      description: La solicitud con el usuario y cuántas solicitudes anteriores hizo. Un `{id}` que no es un UUID se trata como inexistente.
+      responses:
+        "200":
+          description: La solicitud
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryRequestDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/RecoveryRequestNotFound" }
+  /v1/admin/recovery-requests/{id}/approval:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Recovery]
+      summary: Aprobar una solicitud de recuperación de cuenta
+      description: |
+        Marca la solicitud como aprobada por el staff que llama y, en la misma
+        transacción, deja escrito `admin.account_recovery_approved` (firmado con
+        HMAC) para que lo publique el outbox. identify, al procesarlo, desactiva
+        el 2FA del usuario, invalida sus códigos de recuperación y le avisa por
+        email. Solo se puede resolver una vez: si dos miembros del staff la
+        resuelven a la vez, uno recibe `409`.
+      responses:
+        "200":
+          description: Solicitud aprobada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryRequestDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/RecoveryRequestNotFound" }
+        "409": { $ref: "#/components/responses/RecoveryRequestAlreadyResolved" }
+  /v1/admin/recovery-requests/{id}/rejection:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Recovery]
+      summary: Rechazar una solicitud de recuperación de cuenta
+      description: |
+        Marca la solicitud como rechazada y deja escrito
+        `admin.account_recovery_rejected` (firmado). identify solo le avisa al
+        usuario por email; el 2FA sigue activo y el usuario puede volver a pedirla.
+      responses:
+        "200":
+          description: Solicitud rechazada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryRequestDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/RecoveryRequestNotFound" }
+        "409": { $ref: "#/components/responses/RecoveryRequestAlreadyResolved" }
 components:
   securitySchemes:
     bearerAuth:
@@ -487,6 +590,16 @@ components:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
     Forbidden:
       description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    RecoveryRequestNotFound:
+      description: La solicitud no existe (`RECOVERY_REQUEST_NOT_FOUND`)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    RecoveryRequestAlreadyResolved:
+      description: La solicitud ya fue aprobada o rechazada (`RECOVERY_REQUEST_ALREADY_RESOLVED`)
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -662,15 +775,16 @@ components:
           description: null si no hay actividad registrada.
         counts:
           type: object
-          required: [servers, activity, reports, moderation]
+          required: [servers, activity, reports, moderation, recovery_requests]
           properties:
             servers: { type: integer }
             activity: { type: integer }
             reports: { type: integer }
             moderation: { type: integer }
+            recovery_requests: { type: integer }
         latest:
           type: object
-          required: [servers, activity, reports, moderation]
+          required: [servers, activity, reports, moderation, recovery_requests]
           description: Hasta 5 ítems de cada sección, del más nuevo al más viejo.
           properties:
             servers:
@@ -685,6 +799,9 @@ components:
             moderation:
               type: array
               items: { $ref: "#/components/schemas/DossierModerationAction" }
+            recovery_requests:
+              type: array
+              items: { $ref: "#/components/schemas/DossierRecoveryRequest" }
     ServerDossierSummary:
       type: object
       required: [server, messaging, counts, latest]
@@ -753,3 +870,75 @@ components:
         total: { type: integer }
         limit: { type: integer }
         offset: { type: integer }
+    DossierRecoveryRequestPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DossierRecoveryRequest" }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+    RecoveryRequestStatus:
+      type: string
+      enum: [pending, approved, rejected]
+    StaffRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, nullable: true, description: null si el usuario del staff no está en la réplica. }
+    DossierRecoveryRequest:
+      type: object
+      required: [id, status, requested_at, resolved_at, resolved_by]
+      description: Solicitud de recuperación de cuenta del usuario. No es una acción de moderación.
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/RecoveryRequestStatus" }
+        requested_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        resolved_by:
+          allOf: [{ $ref: "#/components/schemas/StaffRef" }]
+          nullable: true
+    RecoveryRequest:
+      type: object
+      required: [id, user, user_id, message, status, requested_at, resolved_at, resolved_by]
+      properties:
+        id: { type: string, format: uuid }
+        user:
+          allOf: [{ $ref: "#/components/schemas/User" }]
+          nullable: true
+          description: null si el alta del usuario todavía no llegó a la réplica.
+        user_id: { type: string, format: uuid }
+        message: { type: string, maxLength: 500, description: Lo que contó el usuario; vacío si no escribió nada. }
+        status: { $ref: "#/components/schemas/RecoveryRequestStatus" }
+        requested_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        resolved_by:
+          allOf: [{ $ref: "#/components/schemas/StaffRef" }]
+          nullable: true
+          description: Quién la aprobó o rechazó; null mientras esté pendiente.
+    RecoveryRequestList:
+      type: object
+      required: [requests, total, limit, offset]
+      properties:
+        requests:
+          type: array
+          items: { $ref: "#/components/schemas/RecoveryRequest" }
+        total: { type: integer, description: Cantidad de solicitudes que cumplen los filtros. }
+        limit: { type: integer }
+        offset: { type: integer }
+    RecoveryRequestDetail:
+      allOf:
+        - { $ref: "#/components/schemas/RecoveryRequest" }
+        - type: object
+          required: [previous_requests]
+          properties:
+            previous_requests:
+              type: object
+              required: [total, rejected]
+              description: Solicitudes anteriores del mismo usuario.
+              properties:
+                total: { type: integer }
+                rejected: { type: integer }

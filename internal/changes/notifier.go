@@ -21,6 +21,8 @@ const (
 	Staff   = "staff"
 	Dossier = "dossier"
 	Metrics = "metrics"
+
+	RecoveryRequests = "recovery_requests"
 )
 
 type Notifier interface {
