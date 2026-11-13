@@ -1,4 +1,4 @@
-.PHONY: run test test-integration mutation build migrate openapi seed-staff republish-suspensions
+.PHONY: run test test-integration mutation build migrate openapi seed-staff republish-suspensions voice-dlq-check voice-dlq-replay
 
 -include .env
 export
@@ -51,6 +51,16 @@ seed-staff:
 # día a un consumidor nuevo. Uso: make republish-suspensions [ARGS=--dry-run]
 republish-suspensions:
 	go run ./cmd/republishsuspensions $(ARGS)
+
+# Inspecciona cada DLQ indicada en VOICE_DLQ_QUEUES y devuelve código 2 si
+# alguna supera VOICE_DLQ_THRESHOLD (por defecto 0), para conectarlo a una
+# alarma de cron/systemd/New Relic.
+voice-dlq-check:
+	go run ./cmd/voicedlq --threshold "$(or $(VOICE_DLQ_THRESHOLD),0)"
+
+# Replay explícito y acotado. Uso: make voice-dlq-replay ARGS="--limit 100"
+voice-dlq-replay:
+	go run ./cmd/voicedlq --replay $(ARGS)
 
 # Corre también los tests de integración contra el Postgres y el RabbitMQ de
 # docker-compose (`docker compose up -d db rabbitmq`). Usa una base aparte,
