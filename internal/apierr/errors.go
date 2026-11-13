@@ -26,6 +26,9 @@ const (
 	CodeServerAlreadySuspended     = "SERVER_ALREADY_SUSPENDED"
 	CodeServerNotSuspended         = "SERVER_NOT_SUSPENDED"
 	CodeDeleteConfirmationMismatch = "DELETE_CONFIRMATION_MISMATCH"
+
+	CodeRecoveryRequestNotFound        = "RECOVERY_REQUEST_NOT_FOUND"
+	CodeRecoveryRequestAlreadyResolved = "RECOVERY_REQUEST_ALREADY_RESOLVED"
 )
 
 type Body struct {
