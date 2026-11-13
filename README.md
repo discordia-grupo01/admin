@@ -108,6 +108,8 @@ discordia-admin/
 - `make migrate` - aplica las migraciones pendientes (lee la conexión de `.env`).
 - `make seed-staff EMAIL=<email>` - da de alta como staff al usuario con ese email.
 - `make republish-suspensions [ARGS=--dry-run]` - vuelve a publicar las suspensiones vigentes (de usuarios y de servidores) para un consumidor nuevo.
+- `VOICE_DLQ_QUEUES=voice... make voice-dlq-check` - inspecciona las DLQ de voz y devuelve código 2 si alguna supera `VOICE_DLQ_THRESHOLD`.
+- `VOICE_DLQ_QUEUES=voice... make voice-dlq-replay ARGS="--limit 100"` - replaya mensajes confirmados de una DLQ de voz en lotes acotados.
 
 ## Tests
 Cobertura mínima: 70 % (requisito del proyecto). El CI la verifica en cada PR, con Postgres y RabbitMQ de servicio.
