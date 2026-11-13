@@ -1,6 +1,6 @@
 # discordia-admin
 
-Servicio de **Administración** de Discordia: la API del backoffice para el staff de la plataforma. Cubre las historias #29 (suspender usuario), #30 (reactivar usuario), #31 (listado de usuarios con filtros) y #32 (listado de servidores), y la optativa #81 (expediente de investigación de un usuario o un servidor).
+Servicio de **Administración** de Discordia: la API del backoffice para el staff de la plataforma. Cubre las historias #29 (suspender usuario), #30 (reactivar usuario), #31 (listado de usuarios con filtros) y #32 (listado de servidores), la optativa #81 (expediente de investigación de un usuario o un servidor) y la recuperación de cuenta sin segundo factor.
 
 > **Estado**: implementados los cuatro endpoints de las historias (#29 a #32), el expediente (#81), la base del servicio (configuración, autenticación de staff, outbox, RabbitMQ, `/livez` y `/readyz`) y el alta de staff. Ver [`openapi.yaml`](openapi.yaml).
 
@@ -122,7 +122,7 @@ Esquemas en [`discordia-docs`](https://github.com/discordia-grupo01/docs) (`asyn
 
 **Publica** (outbox → `discordia.events`): `admin.user_suspended`, con `user_id` y `version`, sin motivo ni email. Se escribe en `outbox_events` en la misma transacción que el cambio de estado, así que una caída de RabbitMQ lo demora pero no lo pierde. Lleva una firma HMAC-SHA256 (`ADMIN_EVENTS_HMAC_SECRET`, helper `Sign`/`Verify` de `events-contract`) que cada consumidor tiene que verificar antes de aplicarlo; `version` sube con cada suspensión o reactivación del usuario y los consumidores ignoran las que no son mayores a la que ya tienen. `DELETE /v1/admin/users/{id}/suspension` publica `admin.user_reactivated` con el mismo esquema (y la `version` siguiente); la firma incluye la routing key, así que un evento de suspensión no puede reenviarse como reactivación.
 
-**Cambios en vivo para el backoffice.** Cuando cambia algo que el backoffice muestra, admin publica `admin.backoffice_changed` con `resource` (`users`, `servers`, `reports`, `staff`, `dossier` o `metrics`) y la lista de miembros del staff a los que hay que avisar (`audience_user_ids`, leída de `staff_members`). No lleva datos ni firma: `notifications` lo empuja por WebSocket a cada miembro del staff y la pantalla vuelve a pedir lo que muestra, así nadie tiene que recargar. Se publica después de aplicar cada evento de `identify` y `servers` (alta de cuenta, perfil, email, servidor, miembros, reportes, acciones de moderación) y de cada acción de staff que termina bien (suspender o reactivar un usuario o un servidor, borrar un servidor). El aviso de `metrics` sale como mucho una vez cada 3 s. Si no se puede avisar, solo se registra un warning: nunca cambia el resultado de la acción ni del evento.
+**Cambios en vivo para el backoffice.** Cuando cambia algo que el backoffice muestra, admin publica `admin.backoffice_changed` con `resource` (`users`, `servers`, `reports`, `staff`, `dossier`, `metrics` o `recovery_requests`) y la lista de miembros del staff a los que hay que avisar (`audience_user_ids`, leída de `staff_members`). No lleva datos ni firma: `notifications` lo empuja por WebSocket a cada miembro del staff y la pantalla vuelve a pedir lo que muestra, así nadie tiene que recargar. Se publica después de aplicar cada evento de `identify` y `servers` (alta de cuenta, perfil, email, solicitud de recuperación, servidor, miembros, reportes, acciones de moderación) y de cada acción de staff que termina bien (suspender o reactivar un usuario o un servidor, borrar un servidor, aprobar o rechazar una solicitud de recuperación). El aviso de `metrics` sale como mucho una vez cada 3 s. Si no se puede avisar, solo se registra un warning: nunca cambia el resultado de la acción ni del evento.
 
 **Consistencia eventual**: `POST /v1/admin/users/{id}/suspension` suspende al usuario en admin al instante, pero identify, servers, messaging y voz lo bloquean recién cuando procesan el evento (normalmente menos de un segundo); con `DELETE`, igual al revés. Por esa ventana el usuario podría operar unos instantes; no se hace ninguna llamada síncrona para cerrarla.
 
@@ -142,7 +142,7 @@ Cuatro `GET` bajo `/v1/admin` (solo staff; sin token `401`, sin ser staff `403`)
 
 | Ruta | Qué devuelve |
 |---|---|
-| `/users/{id}/dossier` | Estado y registro del usuario, última actividad y, de `servers`, `activity`, `reports` y `moderation`, el total y los 5 más recientes |
+| `/users/{id}/dossier` | Estado y registro del usuario, última actividad y, de `servers`, `activity`, `reports`, `moderation` y `recovery_requests`, el total y los 5 más recientes |
 | `/users/{id}/dossier/{section}` | Una de esas secciones, paginada (`limit`, `offset`) |
 | `/servers/{id}/dossier` | Datos del servidor, mensajes de los últimos 7 días UTC (con ceros) y, de `reports` y `moderation`, el total y los 5 más recientes |
 | `/servers/{id}/dossier/{section}` | `reports` o `moderation`, paginada |
@@ -163,6 +163,24 @@ Admin responde **solo con datos locales**: no llama a servers ni a messaging. Pa
 - Los días de la mensajería son **UTC**.
 
 Hasta que identify publique `users.account_registered` y servers publique `servers.server_updated`, las tablas de usuarios y servidores solo se llenan en los tests.
+
+La sección `recovery_requests` ("Seguridad de la cuenta") lista las solicitudes de recuperación del usuario. Va aparte de `moderation` porque recuperar la cuenta no es una sanción, y sí dice qué miembro del staff la resolvió.
+
+## Recuperación de cuenta sin segundo factor
+
+Un usuario con 2FA activo que perdió la app autenticadora y todos sus códigos de recuperación puede pedir, desde el paso de verificación del login, que el staff le devuelva el acceso. La solicitud la crea identify y llega por `users.account_recovery_requested` (cola `admin.users`) a la tabla `account_recovery_requests`; un evento repetido no la duplica.
+
+| Ruta | Qué hace |
+|---|---|
+| `GET /recovery-requests` | Listado paginado con `search` (email o nombre) y `status` (`pending`, `approved`, `rejected`). El `total` con `status=pending` sirve de contador. |
+| `GET /recovery-requests/{id}` | Detalle: usuario, mensaje y cuántas solicitudes anteriores hizo (y cuántas se rechazaron). |
+| `POST /recovery-requests/{id}/approval` | La aprueba y deja en el outbox `admin.account_recovery_approved`, firmado. identify desactiva el 2FA, invalida los códigos y le avisa por email. |
+| `POST /recovery-requests/{id}/rejection` | La rechaza y deja `admin.account_recovery_rejected`, firmado. identify solo le avisa; el usuario puede volver a pedirla. |
+
+- **Una sola vez**: se bloquea la fila al resolver, así que si dos miembros del staff la aprueban o rechazan a la vez, uno recibe `409 RECOVERY_REQUEST_ALREADY_RESOLVED` y no sale un segundo evento.
+- **Firma**: cubre `request_id` y `user_id`, así que una aprobación no se puede mover a otra solicitud ni a otro usuario. El `user_id` sale de la solicitud guardada, no del pedido HTTP.
+- **Consistencia eventual**: la solicitud queda resuelta en admin al instante; el 2FA se desactiva cuando identify procesa el evento.
+- **Orden de despliegue**: admin tiene que enlazar `admin.users` a `users.account_recovery_requested` antes de que identify publique, e identify tiene que enlazar `identify.admin_events` a los dos eventos de respuesta antes de que admin resuelva alguna. Si no, RabbitMQ descarta el evento.
 
 ## Deploy
 

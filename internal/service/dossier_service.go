@@ -20,8 +20,38 @@ const unknownServer = "un servidor"
 // DossierService arma el expediente de investigación de un usuario o un
 // servidor, solo con datos locales (las réplicas de admin).
 type DossierService struct {
-	repo repository.DossierRepository
-	now  func() time.Time
+	repo     repository.DossierRepository
+	recovery RecoveryRequestReader
+	now      func() time.Time
+}
+
+// RecoveryRequestReader lee las solicitudes de recuperación de un usuario.
+type RecoveryRequestReader interface {
+	UserRequests(ctx context.Context, userID string, limit, offset int) ([]model.RecoveryRequest, int, error)
+}
+
+// WithRecoveryRequests suma la sección recovery_requests al expediente de
+// usuario. Sin esto la sección queda vacía.
+func (s *DossierService) WithRecoveryRequests(recovery RecoveryRequestReader) *DossierService {
+	s.recovery = recovery
+	return s
+}
+
+func (s *DossierService) userRecoveryRequests(ctx context.Context, userID string, limit, offset int) ([]model.DossierRecoveryRequest, int, error) {
+	if s.recovery == nil {
+		return []model.DossierRecoveryRequest{}, 0, nil
+	}
+	requests, total, err := s.recovery.UserRequests(ctx, userID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]model.DossierRecoveryRequest, 0, len(requests))
+	for _, r := range requests {
+		out = append(out, model.DossierRecoveryRequest{
+			ID: r.ID, Status: r.Status, RequestedAt: r.RequestedAt, ResolvedAt: r.ResolvedAt, ResolvedBy: r.ResolvedBy,
+		})
+	}
+	return out, total, nil
 }
 
 func NewDossierService(repo repository.DossierRepository) *DossierService {
@@ -40,7 +70,7 @@ func canonicalID(raw string) (string, bool) {
 
 func validUserSection(s string) bool {
 	switch s {
-	case model.SectionServers, model.SectionActivity, model.SectionReports, model.SectionModeration:
+	case model.SectionServers, model.SectionActivity, model.SectionReports, model.SectionModeration, model.SectionRecoveryRequests:
 		return true
 	}
 	return false
@@ -82,11 +112,14 @@ func (s *DossierService) UserSummary(ctx context.Context, userID string) (*model
 	if out.Latest.Moderation, out.Counts.Moderation, err = s.repo.UserModeration(ctx, id, n, 0); err != nil {
 		return nil, err
 	}
+	if out.Latest.RecoveryRequests, out.Counts.RecoveryRequests, err = s.userRecoveryRequests(ctx, id, n, 0); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
 // UserSection devuelve una página de una sección del expediente del usuario:
-// servers, activity, reports o moderation. Una sección desconocida da
+// servers, activity, reports, moderation o recovery_requests. Una sección desconocida da
 // ErrInvalidSection antes de consultar nada.
 func (s *DossierService) UserSection(ctx context.Context, userID, section string, limit, offset int) (any, error) {
 	if !validUserSection(section) {
@@ -110,6 +143,9 @@ func (s *DossierService) UserSection(ctx context.Context, userID, section string
 		return page(describeActivity(entries), total, limit, offset, err)
 	case model.SectionReports:
 		items, total, err := s.repo.UserReports(ctx, id, limit, offset)
+		return page(items, total, limit, offset, err)
+	case model.SectionRecoveryRequests:
+		items, total, err := s.userRecoveryRequests(ctx, id, limit, offset)
 		return page(items, total, limit, offset, err)
 	default:
 		items, total, err := s.repo.UserModeration(ctx, id, limit, offset)

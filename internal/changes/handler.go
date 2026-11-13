@@ -19,6 +19,7 @@ var resourcesOf = map[string][]string{
 	users.RoutingKeyAccountRegistered:             {Users, Metrics},
 	users.RoutingKeyProfileUpdated:                {Users},
 	users.RoutingKeyEmailVerified:                 {Users},
+	users.RoutingKeyAccountRecoveryRequested:      {RecoveryRequests, Dossier},
 	servers.RoutingKeyServerUpdated:               {Servers},
 	servers.RoutingKeyServerDeleted:               {Servers, Metrics},
 	membership.RoutingKeyMemberJoined:             {Servers, Metrics},

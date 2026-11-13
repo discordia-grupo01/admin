@@ -17,7 +17,7 @@ import (
 const QueueUsers = "admin.users"
 
 // UserBindings son las routing keys que alimentan la réplica de usuarios.
-var UserBindings = []string{users.RoutingKeyAccountRegistered, users.RoutingKeyProfileUpdated, users.RoutingKeyEmailVerified}
+var UserBindings = []string{users.RoutingKeyAccountRegistered, users.RoutingKeyProfileUpdated, users.RoutingKeyEmailVerified, users.RoutingKeyAccountRecoveryRequested}
 
 // UserSync es lo que el handler necesita para aplicar los eventos de usuarios.
 type UserSync interface {
@@ -26,16 +26,30 @@ type UserSync interface {
 	ApplyEmailVerification(ctx context.Context, userID string) error
 }
 
+// RecoveryRequestSync guarda las solicitudes de recuperación de cuenta.
+type RecoveryRequestSync interface {
+	ApplyRequest(ctx context.Context, r repository.RecoveryRequestRecord) error
+}
+
 // UserEventsHandler aplica users.account_registered, users.profile_updated y
-// users.email_verified a la réplica de usuarios. Los mensajes que nunca van a poder procesarse
+// users.email_verified a la réplica de usuarios, y users.account_recovery_requested
+// a las solicitudes de recuperación. Los mensajes que nunca van a poder procesarse
 // (JSON roto, ids inválidos, clave desconocida) se descartan; un error de
 // base se devuelve tal cual para que el mensaje se reencole.
 type UserEventsHandler struct {
-	sync UserSync
+	sync     UserSync
+	recovery RecoveryRequestSync
 }
 
 func NewUserEventsHandler(sync UserSync) *UserEventsHandler {
 	return &UserEventsHandler{sync: sync}
+}
+
+// WithRecoveryRequests suma las solicitudes de recuperación de cuenta. Sin
+// esto, users.account_recovery_requested se descarta como clave desconocida.
+func (h *UserEventsHandler) WithRecoveryRequests(recovery RecoveryRequestSync) *UserEventsHandler {
+	h.recovery = recovery
+	return h
 }
 
 func (h *UserEventsHandler) Handle(ctx context.Context, routingKey string, body []byte) error {
@@ -46,9 +60,12 @@ func (h *UserEventsHandler) Handle(ctx context.Context, routingKey string, body 
 		return h.profileUpdated(ctx, body)
 	case users.RoutingKeyEmailVerified:
 		return h.emailVerified(ctx, body)
-	default:
-		return Discard(audit.StatusDiscardedUnknownKey, fmt.Errorf("routing key desconocida %q", routingKey))
+	case users.RoutingKeyAccountRecoveryRequested:
+		if h.recovery != nil {
+			return h.recoveryRequested(ctx, body)
+		}
 	}
+	return Discard(audit.StatusDiscardedUnknownKey, fmt.Errorf("routing key desconocida %q", routingKey))
 }
 
 func (h *UserEventsHandler) accountRegistered(ctx context.Context, body []byte) error {
@@ -104,6 +121,30 @@ func (h *UserEventsHandler) profileUpdated(ctx context.Context, body []byte) err
 		return Discard(audit.StatusDiscardedInvalid, fmt.Errorf("version %d inválida: debe ser >= 1", e.Version))
 	}
 	return h.sync.ApplyProfile(ctx, repository.Profile{UserID: id, Name: e.Name, Version: e.Version})
+}
+
+func (h *UserEventsHandler) recoveryRequested(ctx context.Context, body []byte) error {
+	var e users.AccountRecoveryRequested
+	if err := json.Unmarshal(body, &e); err != nil {
+		return Discard(audit.StatusDiscardedMalformed, err)
+	}
+	requestID, err := parseUUID("request_id", e.RequestID)
+	if err != nil {
+		return Discard(audit.StatusDiscardedInvalid, err)
+	}
+	userID, err := parseUserID(e.UserID)
+	if err != nil {
+		return Discard(audit.StatusDiscardedInvalid, err)
+	}
+	if e.RequestedAt.IsZero() {
+		return Discard(audit.StatusDiscardedInvalid, errors.New("requested_at vacío"))
+	}
+	return h.recovery.ApplyRequest(ctx, repository.RecoveryRequestRecord{
+		RequestID:   requestID,
+		UserID:      userID,
+		Message:     e.Message,
+		RequestedAt: e.RequestedAt.UTC(),
+	})
 }
 
 func parseUserID(raw string) (string, error) { return parseUUID("user_id", raw) }
