@@ -29,7 +29,9 @@ type fakeRecoveryRepo struct {
 	err        error
 }
 
-func (f *fakeRecoveryRepo) Insert(context.Context, repository.RecoveryRequestRecord) error { return f.err }
+func (f *fakeRecoveryRepo) Insert(context.Context, repository.RecoveryRequestRecord) error {
+	return f.err
+}
 
 func (f *fakeRecoveryRepo) List(_ context.Context, filter repository.RecoveryRequestFilter, limit, _ int) ([]model.RecoveryRequest, int, error) {
 	f.filter, f.limit = filter, limit
