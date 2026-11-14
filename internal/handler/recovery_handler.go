@@ -39,6 +39,21 @@ func (h *RecoveryHandler) Register(admin *gin.RouterGroup) {
 }
 
 // List atiende GET /v1/admin/recovery-requests?search=&status=&limit=&offset=.
+//
+// @Summary      Listar solicitudes de recuperación de cuenta
+// @Description  Pedidos de usuarios con 2FA activo que perdieron la app autenticadora y todos sus códigos de recuperación. Llegan de identify por evento (`users.account_recovery_requested`). Lista paginada, de la más reciente a la más vieja. `search` busca por email o nombre del usuario (parcial, sin distinguir mayúsculas). El `total` con `status=pending` sirve de contador de pendientes.
+// @Tags         Recovery
+// @Produce      json
+// @Security     BearerAuth
+// @Param        search  query  string  false  "Texto a buscar en el email o el nombre del usuario. Los caracteres `%`, `_` y `\` se toman como texto literal." maxlength(100)
+// @Param        status  query  string  false  "Deja solo las solicitudes en ese estado. Sin este parámetro se listan todas." Enums(pending, approved, rejected)
+// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(100) default(20)
+// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) default(0)
+// @Success      200  {object}  model.RecoveryRequestList  "Solicitudes que cumplen los filtros (puede ser una lista vacía)"
+// @Failure      400  {object}  apierr.ErrorResponse  "Parámetros de consulta inválidos (`INVALID_QUERY`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
+// @Router       /v1/admin/recovery-requests [get]
 func (h *RecoveryHandler) List(c *gin.Context) {
 	limit, ok := apierr.ParseNonNegativeIntQuery(c, "limit", model.DefaultLimit)
 	if !ok {
@@ -72,6 +87,18 @@ func (h *RecoveryHandler) List(c *gin.Context) {
 }
 
 // Get atiende GET /v1/admin/recovery-requests/{id}.
+//
+// @Summary      Detalle de una solicitud de recuperación de cuenta
+// @Description  La solicitud con el usuario y cuántas solicitudes anteriores hizo. Un `{id}` que no es un UUID se trata como inexistente.
+// @Tags         Recovery
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path  string  true  "ID de la solicitud" format(uuid)
+// @Success      200  {object}  model.RecoveryRequestDetail  "La solicitud"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
+// @Failure      404  {object}  apierr.ErrorResponse  "La solicitud no existe (`RECOVERY_REQUEST_NOT_FOUND`)"
+// @Router       /v1/admin/recovery-requests/{id} [get]
 func (h *RecoveryHandler) Get(c *gin.Context) {
 	detail, err := h.requests.Get(c.Request.Context(), c.Param("id"))
 	if err != nil {
@@ -84,6 +111,19 @@ func (h *RecoveryHandler) Get(c *gin.Context) {
 // Approve atiende POST /v1/admin/recovery-requests/{id}/approval. La solicitud
 // queda aprobada en admin al instante; identify desactiva el 2FA al procesar
 // el evento admin.account_recovery_approved.
+//
+// @Summary      Aprobar una solicitud de recuperación de cuenta
+// @Description  Marca la solicitud como aprobada por el staff que llama y, en la misma transacción, deja escrito `admin.account_recovery_approved` (firmado con HMAC) para que lo publique el outbox. identify, al procesarlo, desactiva el 2FA del usuario, invalida sus códigos de recuperación y le avisa por email. Solo se puede resolver una vez: si dos miembros del staff la resuelven a la vez, uno recibe `409`.
+// @Tags         Recovery
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path  string  true  "ID de la solicitud" format(uuid)
+// @Success      200  {object}  model.RecoveryRequestDetail  "Solicitud aprobada"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
+// @Failure      404  {object}  apierr.ErrorResponse  "La solicitud no existe (`RECOVERY_REQUEST_NOT_FOUND`)"
+// @Failure      409  {object}  apierr.ErrorResponse  "La solicitud ya fue aprobada o rechazada (`RECOVERY_REQUEST_ALREADY_RESOLVED`)"
+// @Router       /v1/admin/recovery-requests/{id}/approval [post]
 func (h *RecoveryHandler) Approve(c *gin.Context) {
 	detail, err := h.requests.Approve(c.Request.Context(), c.Param("id"), middleware.UserID(c))
 	if err != nil {
@@ -94,6 +134,19 @@ func (h *RecoveryHandler) Approve(c *gin.Context) {
 }
 
 // Reject atiende POST /v1/admin/recovery-requests/{id}/rejection.
+//
+// @Summary      Rechazar una solicitud de recuperación de cuenta
+// @Description  Marca la solicitud como rechazada y deja escrito `admin.account_recovery_rejected` (firmado). identify solo le avisa al usuario por email; el 2FA sigue activo y el usuario puede volver a pedirla.
+// @Tags         Recovery
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id  path  string  true  "ID de la solicitud" format(uuid)
+// @Success      200  {object}  model.RecoveryRequestDetail  "Solicitud rechazada"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
+// @Failure      404  {object}  apierr.ErrorResponse  "La solicitud no existe (`RECOVERY_REQUEST_NOT_FOUND`)"
+// @Failure      409  {object}  apierr.ErrorResponse  "La solicitud ya fue aprobada o rechazada (`RECOVERY_REQUEST_ALREADY_RESOLVED`)"
+// @Router       /v1/admin/recovery-requests/{id}/rejection [post]
 func (h *RecoveryHandler) Reject(c *gin.Context) {
 	detail, err := h.requests.Reject(c.Request.Context(), c.Param("id"), middleware.UserID(c))
 	if err != nil {
