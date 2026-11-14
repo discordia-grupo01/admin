@@ -32,7 +32,7 @@ const (
 )
 
 type Body struct {
-	Code    string         `json:"code"`
+	Code    string         `json:"code" example:"FORBIDDEN"`
 	Message string         `json:"message"`
 	Details map[string]any `json:"details"`
 }
