@@ -26,6 +26,7 @@ type ServerSnapshot struct {
 	OwnerID    string
 	CreatedAt  time.Time
 	OccurredAt time.Time
+	IconURL string
 }
 
 // Membership es el último estado conocido de un usuario en un servidor.
@@ -67,17 +68,18 @@ func NewServerRepository(db *sql.DB) ServerRepository {
 
 func (r *postgresServerRepository) UpsertServer(ctx context.Context, s ServerSnapshot) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO servers (server_id, name, owner_id, created_at, snapshot_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO servers (server_id, name, owner_id, created_at, snapshot_at, icon_url)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (server_id) DO UPDATE SET
 			name        = EXCLUDED.name,
 			owner_id    = EXCLUDED.owner_id,
+			icon_url    = EXCLUDED.icon_url,
 			created_at  = EXCLUDED.created_at,
 			snapshot_at = EXCLUDED.snapshot_at,
 			updated_at  = now()
 		WHERE servers.deleted_at IS NULL
 		  AND (servers.snapshot_at IS NULL OR servers.snapshot_at < EXCLUDED.snapshot_at)`,
-		s.ServerID, s.Name, s.OwnerID, s.CreatedAt, s.OccurredAt)
+		s.ServerID, s.Name, s.OwnerID, s.CreatedAt, s.OccurredAt, s.IconURL)
 	if err != nil {
 		return fmt.Errorf("guardar el servidor %s: %w", s.ServerID, err)
 	}
@@ -170,19 +172,19 @@ const serverFilterClause = `
 
 // serverColumns son las columnas de un servidor tal como lo ve el backoffice,
 // sobre `servers s LEFT JOIN users u` (u es el dueño).
-const serverColumns = `s.server_id, s.name, s.owner_id, u.name, s.created_at,
+const serverColumns = `s.server_id, s.name, s.icon_url, s.owner_id, u.name, s.created_at,
 	(SELECT count(*) FROM server_members m WHERE m.server_id = s.server_id AND m.is_member),
 	s.suspended_at`
 
 // scanServer lee una fila con las columnas de serverColumns.
 func scanServer(row interface{ Scan(dest ...any) error }) (model.Server, error) {
 	var s model.Server
-	var name, ownerID, ownerName sql.NullString
+	var name, iconURL, ownerID, ownerName sql.NullString
 	var suspendedAt sql.NullTime
-	if err := row.Scan(&s.ID, &name, &ownerID, &ownerName, &s.CreatedAt, &s.MemberCount, &suspendedAt); err != nil {
+	if err := row.Scan(&s.ID, &name, &iconURL, &ownerID, &ownerName, &s.CreatedAt, &s.MemberCount, &suspendedAt); err != nil {
 		return model.Server{}, err
 	}
-	s.Name, s.OwnerID = name.String, ownerID.String
+	s.Name, s.OwnerID, s.IconURL = name.String, ownerID.String, optionalText(iconURL)
 	if ownerName.Valid {
 		s.OwnerName = &ownerName.String
 	}

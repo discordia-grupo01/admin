@@ -34,6 +34,9 @@ func TestAccountRecoveryFlowWithRealDatabase(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := userRepo.UpsertProfile(ctx, repository.Profile{UserID: userID, Name: "Ana", AvatarURL: "/uploads/profile-images/ana.png", Version: 1}); err != nil {
+		t.Fatal(err)
+	}
 
 	recoveryRepo := repository.NewRecoveryRequestRepository(db)
 	recovery := service.NewRecoveryService(recoveryRepo, flowSecret)
@@ -73,7 +76,8 @@ func TestAccountRecoveryFlowWithRealDatabase(t *testing.T) {
 		t.Fatalf("pendientes = %+v", pending)
 	}
 	got := pending.Requests[0]
-	if got.User == nil || got.User.Name != "Ana" || got.User.Email != "Ana@example.com" || got.Message != "cambié de celular" || got.ResolvedBy != nil {
+	if got.User == nil || got.User.Name != "Ana" || got.User.Email != "Ana@example.com" || got.Message != "cambié de celular" || got.ResolvedBy != nil ||
+		got.User.AvatarURL == nil || *got.User.AvatarURL != "/uploads/profile-images/ana.png" {
 		t.Errorf("solicitud pendiente = %+v (usuario %+v)", got, got.User)
 	}
 	if all := list(""); all.Total != 2 {

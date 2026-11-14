@@ -486,3 +486,57 @@ func TestUserListTieBreakIsStable(t *testing.T) {
 		t.Errorf("páginas con empate: %v + %v", ids(p1), ids(p2))
 	}
 }
+
+func TestUpsertProfileStoresTheAvatar(t *testing.T) {
+	repo, _ := newUserRepo(t)
+	ctx := context.Background()
+	if err := repo.UpsertRegistration(ctx, repository.Registration{UserID: uid(1), Email: "a@example.com", Name: "Ana", RegisteredAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	avatar := func() *string { return listAll(t, repo)[0].AvatarURL }
+	if got := avatar(); got != nil {
+		t.Fatalf("sin perfil el avatar debe ser null, es %q", *got)
+	}
+
+	steps := []struct {
+		profile repository.Profile
+		want    string
+	}{
+		{repository.Profile{UserID: uid(1), Name: "Ana", AvatarURL: "/uploads/profile-images/a.png", Version: 1}, "/uploads/profile-images/a.png"},
+		{repository.Profile{UserID: uid(1), Name: "Ana", AvatarURL: "/uploads/profile-images/b.png", Version: 1}, "/uploads/profile-images/a.png"}, // repetido: se ignora
+		{repository.Profile{UserID: uid(1), Name: "Ana", AvatarURL: "", Version: 2}, ""},                                                           // sacó la foto
+	}
+	for _, s := range steps {
+		if err := repo.UpsertProfile(ctx, s.profile); err != nil {
+			t.Fatal(err)
+		}
+		got := avatar()
+		if s.want == "" && got != nil || s.want != "" && (got == nil || *got != s.want) {
+			t.Fatalf("tras la versión %d el avatar es %v, quería %q", s.profile.Version, got, s.want)
+		}
+	}
+}
+
+// Los usuarios que admin ya tenía antes de guardar el avatar quedan con la
+// columna en NULL: el backfill de identify vuelve a mandar la misma versión y
+// tiene que completarla.
+func TestUpsertProfileWithTheSameVersionFillsAnUnknownAvatar(t *testing.T) {
+	repo, db := newUserRepo(t)
+	ctx := context.Background()
+	if err := repo.UpsertRegistration(ctx, repository.Registration{UserID: uid(1), Email: "a@example.com", Name: "Ana", RegisteredAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertProfile(ctx, repository.Profile{UserID: uid(1), Name: "Ana", Version: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE users SET avatar_url = NULL WHERE user_id = $1`, uid(1)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.UpsertProfile(ctx, repository.Profile{UserID: uid(1), Name: "Ana", AvatarURL: "https://cdn.example.com/a.png", Version: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if got := listAll(t, repo)[0].AvatarURL; got == nil || *got != "https://cdn.example.com/a.png" {
+		t.Fatalf("avatar = %v, quería el del backfill", got)
+	}
+}

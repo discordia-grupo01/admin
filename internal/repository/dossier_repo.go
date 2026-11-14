@@ -55,19 +55,19 @@ func NewDossierRepository(db *sql.DB) DossierRepository {
 
 func (r *postgresDossierRepository) FindUser(ctx context.Context, userID string) (*model.User, error) {
 	var u model.User
-	var name, email sql.NullString
+	var name, email, avatarURL sql.NullString
 	err := r.db.QueryRowContext(ctx, `
-		SELECT user_id, name, email,`+userStatusExpr+`, registered_at, suspended_at
+		SELECT user_id, name, email, avatar_url,`+userStatusExpr+`, registered_at, suspended_at
 		  FROM users
 		 WHERE user_id = $1 AND registered_at IS NOT NULL`, userID,
-	).Scan(&u.ID, &name, &email, &u.Status, &u.CreatedAt, &u.SuspendedAt)
+	).Scan(&u.ID, &name, &email, &avatarURL, &u.Status, &u.CreatedAt, &u.SuspendedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrUserNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("leer el usuario %s: %w", userID, err)
 	}
-	u.Name, u.Email = name.String, email.String
+	u.Name, u.Email, u.AvatarURL = name.String, email.String, optionalText(avatarURL)
 	u.CreatedAt = u.CreatedAt.UTC()
 	if u.SuspendedAt != nil {
 		t := u.SuspendedAt.UTC()
@@ -108,7 +108,7 @@ func (r *postgresDossierRepository) UserMemberships(ctx context.Context, userID 
 		return []model.DossierMembership{}, total, err
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT s.server_id, s.name, m.updated_at`+userMembershipsWhere+`
+		SELECT s.server_id, s.name, s.icon_url, m.updated_at`+userMembershipsWhere+`
 		 ORDER BY m.updated_at DESC, s.server_id
 		 LIMIT $2 OFFSET $3`, userID, limit, offset)
 	if err != nil {
@@ -118,11 +118,12 @@ func (r *postgresDossierRepository) UserMemberships(ctx context.Context, userID 
 	out := []model.DossierMembership{}
 	for rows.Next() {
 		var m model.DossierMembership
-		var name sql.NullString
-		if err := rows.Scan(&m.ServerID, &name, &m.JoinedAt); err != nil {
+		var name, iconURL sql.NullString
+		if err := rows.Scan(&m.ServerID, &name, &iconURL, &m.JoinedAt); err != nil {
 			return nil, 0, fmt.Errorf("leer un servidor del usuario: %w", err)
 		}
 		m.ServerName = nullable(name)
+		m.ServerIconURL = optionalText(iconURL)
 		m.JoinedAt = m.JoinedAt.UTC()
 		out = append(out, m)
 	}

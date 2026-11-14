@@ -120,7 +120,7 @@ func (h *UserEventsHandler) profileUpdated(ctx context.Context, body []byte) err
 	if e.Version < 1 {
 		return Discard(audit.StatusDiscardedInvalid, fmt.Errorf("version %d inválida: debe ser >= 1", e.Version))
 	}
-	return h.sync.ApplyProfile(ctx, repository.Profile{UserID: id, Name: e.Name, Version: e.Version})
+	return h.sync.ApplyProfile(ctx, repository.Profile{UserID: id, Name: e.Name, AvatarURL: strings.TrimSpace(e.AvatarURL), Version: e.Version})
 }
 
 func (h *UserEventsHandler) recoveryRequested(ctx context.Context, body []byte) error {
