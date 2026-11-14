@@ -30,7 +30,12 @@ mutation:
 build:
 	go build -o bin/api ./cmd/api
 
+# Genera openapi.yaml desde las anotaciones swag del codigo (mismo flujo que servers)
+# y valida la sintaxis del resultado. --requiredByDefault: todos los campos de las
+# respuestas se devuelven siempre (los opcionales van como null, nunca ausentes).
 openapi:
+	go run github.com/swaggo/swag/cmd/swag@v1.16.4 init -g cmd/api/main.go -o ./.openapi-tmp --parseInternal --requiredByDefault -q
+	npx --yes swagger2openapi@7 ./.openapi-tmp/swagger.yaml -o openapi.yaml --patch
 	npx --yes swagger-cli@4.0.4 validate openapi.yaml
 
 # Aplica las migraciones pendientes. Lee la conexión de .env, así el mismo
