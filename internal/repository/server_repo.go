@@ -26,7 +26,7 @@ type ServerSnapshot struct {
 	OwnerID    string
 	CreatedAt  time.Time
 	OccurredAt time.Time
-	IconURL string
+	IconURL    string
 }
 
 // Membership es el último estado conocido de un usuario en un servidor.
