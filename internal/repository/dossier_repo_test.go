@@ -99,6 +99,17 @@ func TestUserMembershipsListsOnlyCurrentServersNewestFirst(t *testing.T) {
 	if got[0].ServerID != uid(2) || *got[0].ServerName != "Dos" || !got[0].JoinedAt.Equal(base.Add(time.Hour)) || got[1].ServerID != uid(1) {
 		t.Errorf("servidores = %+v", got)
 	}
+	if got[0].ServerIconURL != nil {
+		t.Errorf("un servidor sin ícono debe venir con null, vino %q", *got[0].ServerIconURL)
+	}
+	withIcon := snap(2, "Dos", 9, 0, 10)
+	withIcon.IconURL = "/v1/servers/" + uid(2) + "/icon?v=abc"
+	if err := e.servers.UpsertServer(ctx, withIcon); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := e.repo.UserMemberships(ctx, uid(7), 10, 0); got[0].ServerIconURL == nil || *got[0].ServerIconURL != withIcon.IconURL {
+		t.Errorf("ícono del servidor = %v, quería %q", got[0].ServerIconURL, withIcon.IconURL)
+	}
 
 	// Una página más allá del final trae el total y ningún ítem.
 	got, total, err = e.repo.UserMemberships(ctx, uid(7), 10, 5)
@@ -294,5 +305,26 @@ func TestServerMessagingHasSevenUTCDaysWithZeros(t *testing.T) {
 		if d.Messages != 0 {
 			t.Errorf("día %s = %d, quería 0", d.Date, d.Messages)
 		}
+	}
+}
+
+func TestFindUserAndServerIncludeTheirImages(t *testing.T) {
+	e := newDossierEnv(t)
+	ctx := context.Background()
+	seed(t, e.db, []seedUser{{n: 1, name: "Ale", email: "ale@example.com"}})
+	if err := repository.NewUserRepository(e.db).UpsertProfile(ctx, repository.Profile{UserID: uid(1), Name: "Ale", AvatarURL: "/uploads/profile-images/ale.png", Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	s := snap(1, "Sala", 1, 0, 1)
+	s.IconURL = "/v1/servers/" + uid(1) + "/icon?v=abc"
+	if err := e.servers.UpsertServer(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+
+	if u, err := e.repo.FindUser(ctx, uid(1)); err != nil || u.AvatarURL == nil || *u.AvatarURL != "/uploads/profile-images/ale.png" {
+		t.Errorf("usuario = %+v, err = %v", u, err)
+	}
+	if srv, err := e.repo.FindServer(ctx, uid(1)); err != nil || srv.IconURL == nil || *srv.IconURL != s.IconURL {
+		t.Errorf("servidor = %+v, err = %v", srv, err)
 	}
 }

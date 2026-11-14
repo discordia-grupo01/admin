@@ -84,7 +84,7 @@ const recoveryUserStatusExpr = `
 const recoverySelect = `
 	SELECT r.request_id, r.user_id, r.message, r.status, r.requested_at, r.resolved_at, r.resolved_by,
 	       s.name,
-	       u.registered_at IS NOT NULL, u.name, u.email,` + recoveryUserStatusExpr + `, u.registered_at, u.suspended_at
+	       u.registered_at IS NOT NULL, u.name, u.email, u.avatar_url,` + recoveryUserStatusExpr + `, u.registered_at, u.suspended_at
 	  FROM account_recovery_requests r
 	  LEFT JOIN users u ON u.user_id = r.user_id
 	  LEFT JOIN users s ON s.user_id = r.resolved_by`
@@ -101,11 +101,12 @@ func scanRecoveryRequest(row rowScanner) (model.RecoveryRequest, error) {
 		staffName           sql.NullString
 		registered          sql.NullBool
 		name, email, uState sql.NullString
+		avatarURL           sql.NullString
 		registeredAt        sql.NullTime
 		suspendedAt         sql.NullTime
 	)
 	if err := row.Scan(&req.ID, &req.UserID, &req.Message, &status, &req.RequestedAt, &req.ResolvedAt, &resolvedBy,
-		&staffName, &registered, &name, &email, &uState, &registeredAt, &suspendedAt); err != nil {
+		&staffName, &registered, &name, &email, &avatarURL, &uState, &registeredAt, &suspendedAt); err != nil {
 		return req, err
 	}
 	req.Status = model.RecoveryRequestStatus(status)
@@ -122,6 +123,7 @@ func scanRecoveryRequest(row rowScanner) (model.RecoveryRequest, error) {
 			ID:        req.UserID,
 			Name:      name.String,
 			Email:     email.String,
+			AvatarURL: optionalText(avatarURL),
 			Status:    model.UserStatus(uState.String),
 			CreatedAt: registeredAt.Time.UTC(),
 		}
