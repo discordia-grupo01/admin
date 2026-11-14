@@ -47,6 +47,21 @@ func (h *UserHandler) Register(admin *gin.RouterGroup) {
 }
 
 // List atiende GET /v1/admin/users?search=&status=&limit=&offset= (HU #31).
+//
+// @Summary      Listar usuarios con filtros (HU #31)
+// @Description  Lista paginada, ordenada por fecha de registro descendente. `search` busca por email o nombre (parcial, sin distinguir mayúsculas).
+// @Tags         Users
+// @Produce      json
+// @Security     BearerAuth
+// @Param        search  query  string  false  "Texto a buscar en el email o el nombre. Los caracteres `%`, `_` y `\` se toman como texto literal." maxlength(100)
+// @Param        status  query  string  false  "Deja solo los usuarios en ese estado. Sin este parámetro se listan todos." Enums(active, pending, suspended)
+// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(100) default(20)
+// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) default(0)
+// @Success      200  {object}  model.UserList  "Usuarios que cumplen los filtros (puede ser una lista vacía)"
+// @Failure      400  {object}  apierr.ErrorResponse  "Parámetros de consulta inválidos (`INVALID_QUERY`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
+// @Router       /v1/admin/users [get]
 func (h *UserHandler) List(c *gin.Context) {
 	limit, ok := apierr.ParseNonNegativeIntQuery(c, "limit", model.DefaultLimit)
 	if !ok {
