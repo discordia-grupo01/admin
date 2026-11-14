@@ -42,8 +42,11 @@ type DossierPage[T any] struct {
 type DossierMembership struct {
 	ServerID string `json:"server_id"`
 	// ServerName es null si la foto del servidor todavía no llegó a la réplica.
-	ServerName *string   `json:"server_name"`
-	JoinedAt   time.Time `json:"joined_at"`
+	ServerName *string `json:"server_name"`
+	// ServerIconURL es la dirección del ícono tal como la guarda servers, o
+	// null si no tiene o todavía no llegó a la réplica.
+	ServerIconURL *string   `json:"server_icon_url"`
+	JoinedAt      time.Time `json:"joined_at"`
 }
 
 // DossierActivity es algo que hizo el usuario. Nunca incluye el contenido de un
