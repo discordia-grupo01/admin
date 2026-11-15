@@ -2,51 +2,58 @@ services:
   api:
     build: .
     ports:
-      - "8080:8080"
-    # Opcional: sin .env, `docker compose ps/exec` (y el resto de los servicios)
-    # siguen funcionando; solo `api` necesita las variables para arrancar.
+      - "${API_PORT:-8080}:8080"
     env_file:
       - path: .env
         required: false
     environment:
-      # Dentro de la red de compose los servicios se alcanzan por nombre.
+      ENVIRONMENT: development
+      HOST: 0.0.0.0
+      PORT: 8080
       DATABASE_HOST: db
-      DATABASE_PORT: "5432"
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${DATABASE_NAME:-discordia_admin}
+      DATABASE_USER: ${DATABASE_USER:-discordia}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-discordia}
+      DATABASE_SSLMODE: disable
+      DATABASE_SCHEMA: ""
+      JWT_SECRET: ${JWT_SECRET:-secreto-jwt-solo-local}
+      ADMIN_EVENTS_HMAC_SECRET: ${ADMIN_EVENTS_HMAC_SECRET:-secreto-admin-solo-local}
+      RABBITMQ_URL: ${RABBITMQ_URL_DOCKER:-amqp://guest:guest@host.docker.internal:5672/}
+      STAFF_USER_IDS: ${STAFF_USER_IDS:-11111111-1111-4111-8111-111111111111}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    image: migrate/migrate
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://${DATABASE_USER:-discordia}:${DATABASE_PASSWORD:-discordia}@db:5432/${DATABASE_NAME:-discordia_admin}?sslmode=disable"
+      - "up"
+    volumes:
+      - ./migrations:/migrations:ro
     depends_on:
       db:
-        condition: service_healthy
-      rabbitmq:
         condition: service_healthy
 
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: discordia_admin
-      POSTGRES_USER: discordia
-      POSTGRES_PASSWORD: discordia
+      POSTGRES_DB: ${DATABASE_NAME:-discordia_admin}
+      POSTGRES_USER: ${DATABASE_USER:-discordia}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-discordia}
     ports:
-      # 5433 en el host para no chocar con el Postgres de otros servicios
-      # (identify, servers) ni con uno instalado localmente en el 5432.
-      - "5433:5432"
+      - "${DATABASE_PORT:-5433}:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U discordia -d discordia_admin"]
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-discordia} -d ${DATABASE_NAME:-discordia_admin}"]
       interval: 5s
       timeout: 5s
       retries: 5
-
-  rabbitmq:
-    image: rabbitmq:3.13-management-alpine
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
 volumes:
   db_data:
