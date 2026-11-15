@@ -84,6 +84,57 @@ jobs:
             exit 1
           fi
 
+  # Valida con Schemathesis que el servicio cumpla openapi.yaml. Corre en paralelo
+  # a `test`, contra un Postgres y un RabbitMQ del propio job, sin secrets.
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: discordia_admin_contract
+          POSTGRES_USER: discordia
+          POSTGRES_PASSWORD: discordia
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U discordia"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CONTRACT_DB_PORT: 5432
+      CONTRACT_MQ_PORT: 5672
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Migrar la base
+        env:
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_USER: discordia
+          DATABASE_PASSWORD: discordia
+          DATABASE_NAME: discordia_admin_contract
+          DATABASE_SSLMODE: disable
+        run: make migrate
+      - name: Tests de contrato (Schemathesis)
+        run: make contract-test
+
   # Aplica las migraciones pendientes contra la base de produccion (Supabase)
   # con `make migrate`: golang-migrate corre solo las que faltan segun la tabla
   # schema_migrations. Va antes del deploy: el codigo nuevo arranca con el schema
