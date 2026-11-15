@@ -29,6 +29,7 @@ for host in "$DB_HOST" "$MQ_HOST"; do
   esac
 done
 
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 PY="${PYTHON:-python}"
 VENV=".contract-venv"
 if [ -x "$VENV/bin/schemathesis" ]; then
@@ -57,6 +58,11 @@ go build -o .contract-api ./cmd/api
 ./.contract-api >"$LOG" 2>&1 &
 APP_PID=$!
 cleanup() {
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "--- ultimas lineas del log del servicio ---" >&2
+    tail -n 25 "$LOG" >&2 || true
+  fi
   kill "$APP_PID" 2>/dev/null || true
   rm -f .contract-api .contract-api.exe "$LOG"
 }
