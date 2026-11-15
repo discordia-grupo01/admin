@@ -6,3 +6,4 @@
 /.openapi-tmp/
 /.contract-venv/
 /.contract-api*
+/.schemathesis/
