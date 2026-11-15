@@ -17,25 +17,25 @@ func (s RecoveryRequestStatus) Valid() bool {
 
 // StaffRef es un miembro del staff tal como se muestra en una solicitud.
 type StaffRef struct {
-	ID string `json:"id"`
+	ID string `json:"id" format:"uuid"`
 	// Name es null si el usuario del staff no está en la réplica.
-	Name *string `json:"name"`
+	Name *string `json:"name" extensions:"x-nullable"`
 }
 
 // RecoveryRequest es una solicitud de un usuario que perdió su segundo factor
 // para que el staff le desactive el 2FA.
 type RecoveryRequest struct {
-	ID string `json:"id"`
+	ID string `json:"id" format:"uuid"`
 	// User es null si el alta del usuario todavía no llegó a la réplica.
-	User   *User  `json:"user"`
-	UserID string `json:"user_id"`
+	User   *User  `json:"user" extensions:"x-nullable"`
+	UserID string `json:"user_id" format:"uuid"`
 	// Message es lo que contó el usuario, o vacío si no escribió nada.
-	Message     string                `json:"message"`
+	Message     string                `json:"message" maxLength:"500"`
 	Status      RecoveryRequestStatus `json:"status"`
-	RequestedAt time.Time             `json:"requested_at"`
+	RequestedAt time.Time             `json:"requested_at" format:"date-time"`
 	// ResolvedAt y ResolvedBy son null mientras esté pendiente.
-	ResolvedAt *time.Time `json:"resolved_at"`
-	ResolvedBy *StaffRef  `json:"resolved_by"`
+	ResolvedAt *time.Time `json:"resolved_at" format:"date-time" extensions:"x-nullable"`
+	ResolvedBy *StaffRef  `json:"resolved_by" extensions:"x-nullable"`
 }
 
 // RecoveryRequestList es una página del listado de solicitudes.

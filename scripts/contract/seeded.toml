@@ -1,0 +1,62 @@
+# Segunda pasada de los tests de contrato: usa los ids de seed.sql para llegar a la
+# logica de cada operacion en vez de recibir siempre 404. Lo usa scripts/contract-test.sh.
+
+[[operations]]
+include-path = "/v1/admin/users/{id}/dossier"
+include-method = "GET"
+parameters = { id = "00000000-0000-4000-8000-0000000000b1" }
+
+[[operations]]
+include-path = "/v1/admin/users/{id}/dossier/{section}"
+include-method = "GET"
+parameters = { id = "00000000-0000-4000-8000-0000000000b1" }
+
+[[operations]]
+include-path = "/v1/admin/users/{id}/suspension"
+include-method = "POST"
+parameters = { id = "00000000-0000-4000-8000-0000000000b2" }
+
+[[operations]]
+include-path = "/v1/admin/users/{id}/suspension"
+include-method = "DELETE"
+parameters = { id = "00000000-0000-4000-8000-0000000000b3" }
+
+[[operations]]
+include-path = "/v1/admin/servers/{id}/dossier"
+include-method = "GET"
+parameters = { id = "00000000-0000-4000-8000-0000000000c1" }
+
+[[operations]]
+include-path = "/v1/admin/servers/{id}/dossier/{section}"
+include-method = "GET"
+parameters = { id = "00000000-0000-4000-8000-0000000000c1" }
+
+[[operations]]
+include-path = "/v1/admin/servers/{id}/suspension"
+include-method = "POST"
+parameters = { id = "00000000-0000-4000-8000-0000000000c2" }
+
+[[operations]]
+include-path = "/v1/admin/servers/{id}/suspension"
+include-method = "DELETE"
+parameters = { id = "00000000-0000-4000-8000-0000000000c3" }
+
+[[operations]]
+include-path = "/v1/admin/servers/{id}"
+include-method = "DELETE"
+parameters = { id = "00000000-0000-4000-8000-0000000000c4", "body.confirm_name" = "Servidor A Eliminar" }
+
+[[operations]]
+include-path = "/v1/admin/recovery-requests/{id}"
+include-method = "GET"
+parameters = { id = "00000000-0000-4000-8000-0000000000d1" }
+
+[[operations]]
+include-path = "/v1/admin/recovery-requests/{id}/approval"
+include-method = "POST"
+parameters = { id = "00000000-0000-4000-8000-0000000000d2" }
+
+[[operations]]
+include-path = "/v1/admin/recovery-requests/{id}/rejection"
+include-method = "POST"
+parameters = { id = "00000000-0000-4000-8000-0000000000d3" }

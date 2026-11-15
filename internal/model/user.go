@@ -19,18 +19,18 @@ func (s UserStatus) Valid() bool {
 
 // User es un usuario tal como lo ve el backoffice.
 type User struct {
-	ID    string `json:"id"`
+	ID    string `json:"id" format:"uuid"`
 	Name  string `json:"name"`
-	Email string `json:"email"`
+	Email string `json:"email" format:"email"`
 	// AvatarURL es la dirección de la foto de perfil tal como la guarda
 	// identify (URL pública o ruta del gateway), o null si no tiene o todavía
 	// no llegó a la réplica.
-	AvatarURL *string    `json:"avatar_url"`
+	AvatarURL *string    `json:"avatar_url" extensions:"x-nullable"`
 	Status    UserStatus `json:"status"`
 	// CreatedAt es la fecha de registro de la cuenta (UTC).
-	CreatedAt time.Time `json:"created_at"`
+	CreatedAt time.Time `json:"created_at" format:"date-time"`
 	// SuspendedAt es null si el usuario no está suspendido.
-	SuspendedAt *time.Time `json:"suspended_at"`
+	SuspendedAt *time.Time `json:"suspended_at" format:"date-time" extensions:"x-nullable"`
 }
 
 // UserList es una página del listado de usuarios.
