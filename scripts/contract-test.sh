@@ -54,6 +54,13 @@ export DATABASE_NAME=discordia_admin_contract DATABASE_SSLMODE=disable DATABASE_
 export RABBITMQ_URL="amqp://guest:guest@$MQ_HOST:$MQ_PORT/"
 export JWT_SECRET ADMIN_EVENTS_HMAC_SECRET="contract-test-hmac" STAFF_USER_IDS="$STAFF_ID"
 
+# Datos de prueba (scripts/contract/seed.sql) en la base efimera de contrato.
+if command -v psql >/dev/null 2>&1; then
+  PGPASSWORD=discordia psql -q -v ON_ERROR_STOP=1 -h "$DB_HOST" -p "$DB_PORT" -U discordia     -d discordia_admin_contract -f scripts/contract/seed.sql >/dev/null
+else
+  docker exec -i contract-admin-pg psql -q -v ON_ERROR_STOP=1 -U discordia     -d discordia_admin_contract <scripts/contract/seed.sql >/dev/null
+fi
+
 go build -o .contract-api ./cmd/api
 ./.contract-api >"$LOG" 2>&1 &
 APP_PID=$!
@@ -78,8 +85,16 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
-"$ST" run openapi.yaml \
+# Pasada 1: ids inventados, cubre los caminos de error (404, 400, 401...).
+"$ST" --config-file scripts/contract/contract.toml run openapi.yaml \
   --url "http://127.0.0.1:$APP_PORT" \
   -H "Authorization: Bearer $TOKEN" \
-  --max-examples "$MAX_EXAMPLES" \
-  --checks all
+  --max-examples "$MAX_EXAMPLES"
+
+# Pasada 2: las operaciones con {id} contra los datos sembrados, para llegar a la
+# logica real (expedientes, suspensiones, recuperacion). Ver scripts/contract/seeded.toml.
+"$ST" --config-file scripts/contract/seeded.toml run openapi.yaml \
+  --url "http://127.0.0.1:$APP_PORT" \
+  -H "Authorization: Bearer $TOKEN" \
+  --include-path-regex '\{id\}' \
+  --max-examples "$MAX_EXAMPLES"
