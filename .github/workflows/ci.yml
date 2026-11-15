@@ -64,11 +64,17 @@ jobs:
       - run: go vet ./...
       - name: Regenerar y validar openapi.yaml
         run: make openapi
+      # Solo se usan actions de GitHub (la organización no permite las de terceros),
+      # por eso el commit se hace con git a mano.
       - name: Commitear openapi.yaml si cambió
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "docs(openapi): regenerate openapi.yaml [skip ci]"
-          file_pattern: openapi.yaml
+        run: |
+          if ! git diff --quiet -- openapi.yaml; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add openapi.yaml
+            git commit -m "docs(openapi): regenerate openapi.yaml [skip ci]"
+            git push
+          fi
       - name: Migrar la base de test
         run: make migrate
       - name: Tests (con cobertura)
