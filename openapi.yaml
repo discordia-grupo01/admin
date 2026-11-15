@@ -46,6 +46,30 @@ paths:
       summary: Readiness check
       tags:
         - Health
+  /v1/admin/me:
+    get:
+      description: El backoffice lo llama al iniciar sesión, después de validar las
+        credenciales con identify, para no dejar entrar a quien no es staff.
+      responses:
+        "204":
+          description: Quien llama es staff de la plataforma
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Verificar que quien llama es staff
+      tags:
+        - Session
   /v1/admin/recovery-requests:
     get:
       description: Pedidos de usuarios con 2FA activo que perdieron la app
