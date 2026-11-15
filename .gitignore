@@ -4,3 +4,5 @@
 .DS_Store
 /api
 /.openapi-tmp/
+/.contract-venv/
+/.contract-api*

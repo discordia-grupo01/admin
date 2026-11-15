@@ -1,4 +1,4 @@
-.PHONY: run test test-integration mutation build migrate openapi seed-staff republish-suspensions voice-dlq-check voice-dlq-replay
+.PHONY: run test test-integration mutation build migrate openapi contract-deps-up contract-deps-down contract-test seed-staff republish-suspensions voice-dlq-check voice-dlq-replay
 
 -include .env
 export
@@ -37,6 +37,21 @@ openapi:
 	go run github.com/swaggo/swag/cmd/swag@v1.16.4 init -g cmd/api/main.go -o ./.openapi-tmp --parseInternal --requiredByDefault -q
 	npx --yes swagger2openapi@7 ./.openapi-tmp/swagger.yaml -o openapi.yaml --patch
 	npx --yes swagger-cli@4.0.4 validate openapi.yaml
+
+# Tests de contrato: Schemathesis contra el servicio levantado con un Postgres y
+# un RabbitMQ efimeros y locales (puertos 55501 y 55511). Ver README.
+contract-deps-up:
+	docker run -d --rm --name contract-admin-pg -p 55501:5432 -e POSTGRES_USER=discordia -e POSTGRES_PASSWORD=discordia -e POSTGRES_DB=discordia_admin_contract postgres:16-alpine
+	docker run -d --rm --name contract-admin-rabbitmq -p 55511:5672 rabbitmq:3.13-alpine
+	until docker exec contract-admin-pg pg_isready -U discordia >/dev/null 2>&1; do sleep 1; done
+	sleep 2
+	$(MAKE) migrate DATABASE_HOST=localhost DATABASE_PORT=55501 DATABASE_NAME=discordia_admin_contract DATABASE_SCHEMA=
+
+contract-deps-down:
+	-docker rm -f contract-admin-pg contract-admin-rabbitmq
+
+contract-test:
+	bash scripts/contract-test.sh
 
 # Aplica las migraciones pendientes. Lee la conexión de .env, así el mismo
 # target sirve para el Postgres local (defaults de arriba) y para Supabase
