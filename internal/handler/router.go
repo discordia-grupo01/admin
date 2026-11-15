@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"net/http"
+
 	"github.com/discordia-grupo01/admin/internal/apierr"
 	"github.com/discordia-grupo01/admin/internal/changes"
 	"github.com/discordia-grupo01/admin/internal/logging"
@@ -33,6 +35,9 @@ func NewRouter(deps Deps, registrars ...RouteRegistrar) *gin.Engine {
 	if deps.Changes != nil {
 		admin.Use(middleware.NotifyChanges(deps.Changes))
 	}
+	// GET /v1/admin/me: 204 si quien llama es staff. Los middlewares del grupo
+	// ya responden 401 o 403 en cualquier otro caso.
+	admin.GET("/me", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	for _, register := range registrars {
 		register(admin)
 	}

@@ -8,6 +8,7 @@ info:
     staff de la plataforma.
 
     **Estado**: implementados todos los endpoints: `/livez`, `/readyz`,
+    `GET /v1/admin/me`,
     `GET /v1/admin/users` (#31), `GET /v1/admin/servers` (#32),
     `POST` / `DELETE /v1/admin/users/{id}/suspension` (#29 y #30),
     `DELETE /v1/admin/servers/{id}` (#68) y
@@ -35,6 +36,7 @@ security:
   - bearerAuth: []
 tags:
   - name: Health
+  - name: Session
   - name: Users
   - name: Servers
   - name: Dossier
@@ -82,6 +84,18 @@ paths:
                     type: array
                     items: { type: string }
                     example: [postgres]
+  /v1/admin/me:
+    get:
+      tags: [Session]
+      summary: Verificar que quien llama es staff
+      description: |
+        El backoffice lo llama al iniciar sesión, después de validar las
+        credenciales con identify, para no dejar entrar a quien no es staff.
+      responses:
+        "204":
+          description: Quien llama es staff de la plataforma
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /v1/admin/users:
     get:
       tags: [Users]
