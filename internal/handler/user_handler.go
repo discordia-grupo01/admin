@@ -20,12 +20,24 @@ const maxSearchLength = 100
 // searchQuery lee el parámetro search sin espacios en los bordes. Si supera
 // maxSearchLength responde 400 y devuelve false.
 func searchQuery(c *gin.Context) (string, bool) {
-	search := strings.TrimSpace(c.Query("search"))
+	// Postgres no admite NUL en un texto: se descarta en vez de fallar con 500.
+	search := strings.TrimSpace(strings.ReplaceAll(c.Query("search"), "\x00", ""))
 	if utf8.RuneCountInString(search) > maxSearchLength {
 		apierr.InvalidQuery(c, "search", "El parámetro search no puede superar los 100 caracteres")
 		return "", false
 	}
 	return search, true
+}
+
+// statusQuery lee el filtro status. Si viene el parámetro pero vacío responde
+// 400: para no filtrar hay que omitirlo.
+func statusQuery(c *gin.Context) (string, bool) {
+	status, present := c.GetQuery("status")
+	if present && status == "" {
+		apierr.InvalidQuery(c, "status", "El parámetro status no puede estar vacío: omitilo para no filtrar")
+		return "", false
+	}
+	return status, true
 }
 
 // UserLister es lo que el handler necesita del servicio de usuarios.
@@ -55,8 +67,8 @@ func (h *UserHandler) Register(admin *gin.RouterGroup) {
 // @Security     BearerAuth
 // @Param        search  query  string  false  "Texto a buscar en el email o el nombre. Los caracteres `%`, `_` y `\` se toman como texto literal." maxlength(100)
 // @Param        status  query  string  false  "Deja solo los usuarios en ese estado. Sin este parámetro se listan todos." Enums(active, pending, suspended)
-// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(100) default(20)
-// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) default(0)
+// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(9007199254740991) default(20)
+// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) maximum(9007199254740991) default(0)
 // @Success      200  {object}  model.UserList  "Usuarios que cumplen los filtros (puede ser una lista vacía)"
 // @Failure      400  {object}  apierr.ErrorResponse  "Parámetros de consulta inválidos (`INVALID_QUERY`)"
 // @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
@@ -75,10 +87,14 @@ func (h *UserHandler) List(c *gin.Context) {
 	if !ok {
 		return
 	}
+	status, ok := statusQuery(c)
+	if !ok {
+		return
+	}
 
 	list, err := h.users.List(c.Request.Context(), service.ListUsersParams{
 		Search: search,
-		Status: model.UserStatus(c.Query("status")),
+		Status: model.UserStatus(status),
 		Limit:  limit,
 		Offset: offset,
 	})

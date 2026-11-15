@@ -47,8 +47,8 @@ func (h *RecoveryHandler) Register(admin *gin.RouterGroup) {
 // @Security     BearerAuth
 // @Param        search  query  string  false  "Texto a buscar en el email o el nombre del usuario. Los caracteres `%`, `_` y `\` se toman como texto literal." maxlength(100)
 // @Param        status  query  string  false  "Deja solo las solicitudes en ese estado. Sin este parámetro se listan todas." Enums(pending, approved, rejected)
-// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(100) default(20)
-// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) default(0)
+// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(9007199254740991) default(20)
+// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) maximum(9007199254740991) default(0)
 // @Success      200  {object}  model.RecoveryRequestList  "Solicitudes que cumplen los filtros (puede ser una lista vacía)"
 // @Failure      400  {object}  apierr.ErrorResponse  "Parámetros de consulta inválidos (`INVALID_QUERY`)"
 // @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
@@ -67,10 +67,14 @@ func (h *RecoveryHandler) List(c *gin.Context) {
 	if !ok {
 		return
 	}
+	status, ok := statusQuery(c)
+	if !ok {
+		return
+	}
 
 	list, err := h.requests.List(c.Request.Context(), service.ListRecoveryRequestsParams{
 		Search: search,
-		Status: model.RecoveryRequestStatus(c.Query("status")),
+		Status: model.RecoveryRequestStatus(status),
 		Limit:  limit,
 		Offset: offset,
 	})

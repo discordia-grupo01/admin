@@ -13,6 +13,7 @@ const (
 	CodeSessionExpired       = "SESSION_EXPIRED"
 	CodeForbidden            = "FORBIDDEN"
 	CodeNotFound             = "NOT_FOUND"
+	CodeMethodNotAllowed     = "METHOD_NOT_ALLOWED"
 	CodeInternal             = "INTERNAL_ERROR"
 	CodeInvalidQuery         = "INVALID_QUERY"
 	CodeInvalidSection       = "INVALID_SECTION"
@@ -54,15 +55,19 @@ func InvalidQuery(c *gin.Context, param, message string) {
 	Abort(c, http.StatusBadRequest, CodeInvalidQuery, message, map[string]any{"param": param})
 }
 
+// MaxQueryInt es el máximo que acepta un entero de la query (2^53-1, el mayor
+// entero que un JSON representa exacto); lo declara openapi.yaml.
+const MaxQueryInt = 1<<53 - 1
+
 // ParseNonNegativeIntQuery lee un parámetro entero >= 0 de la query string.
 // Si falta devuelve def; si es inválido responde 400 y devuelve ok=false.
 func ParseNonNegativeIntQuery(c *gin.Context, key string, def int) (value int, ok bool) {
-	raw := c.Query(key)
-	if raw == "" {
+	raw, present := c.GetQuery(key)
+	if !present {
 		return def, true
 	}
 	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
+	if err != nil || n < 0 || n > MaxQueryInt {
 		InvalidQuery(c, key, "El parámetro "+key+" debe ser un entero mayor o igual a 0")
 		return 0, false
 	}
@@ -79,6 +84,10 @@ func Forbidden(c *gin.Context) {
 
 func NotFound(c *gin.Context) {
 	Abort(c, http.StatusNotFound, CodeNotFound, "El recurso solicitado no existe", nil)
+}
+
+func MethodNotAllowed(c *gin.Context) {
+	Abort(c, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "El método no está permitido para este recurso", nil)
 }
 
 func Internal(c *gin.Context) {

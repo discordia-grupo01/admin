@@ -79,8 +79,8 @@ func (h *DossierHandler) UserSummary(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        id  path  string  true  "ID del usuario" format(uuid)
 // @Param        section  path  string  true  "Sección del expediente" Enums(servers, activity, reports, moderation, recovery_requests)
-// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(100) default(20)
-// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) default(0)
+// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(9007199254740991) default(20)
+// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) maximum(9007199254740991) default(0)
 // @Success      200  {object}  sectionPage  "Una página de la sección (puede ser vacía)"
 // @Failure      400  {object}  apierr.ErrorResponse  "La sección no existe (`INVALID_SECTION`) o `limit` / `offset` son inválidos (`INVALID_QUERY`)"
 // @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
@@ -135,8 +135,8 @@ func (h *DossierHandler) ServerSummary(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        id  path  string  true  "ID del servidor" format(uuid)
 // @Param        section  path  string  true  "Sección del expediente" Enums(reports, moderation)
-// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(100) default(20)
-// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) default(0)
+// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(9007199254740991) default(20)
+// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) maximum(9007199254740991) default(0)
 // @Success      200  {object}  sectionPage  "Una página de la sección (puede ser vacía)"
 // @Failure      400  {object}  apierr.ErrorResponse  "La sección no existe (`INVALID_SECTION`) o `limit` / `offset` son inválidos (`INVALID_QUERY`)"
 // @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"

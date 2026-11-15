@@ -102,7 +102,7 @@ paths:
           schema:
             type: integer
             minimum: 0
-            maximum: 100
+            maximum: 9007199254740991
             default: 20
         - description: Cantidad de ítems a saltear
           in: query
@@ -110,6 +110,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 9007199254740991
             default: 0
       responses:
         "200":
@@ -317,7 +318,7 @@ paths:
           schema:
             type: integer
             minimum: 0
-            maximum: 100
+            maximum: 9007199254740991
             default: 20
         - description: Cantidad de ítems a saltear
           in: query
@@ -325,6 +326,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 9007199254740991
             default: 0
       responses:
         "200":
@@ -501,7 +503,7 @@ paths:
           schema:
             type: integer
             minimum: 0
-            maximum: 100
+            maximum: 9007199254740991
             default: 20
         - description: Cantidad de ítems a saltear
           in: query
@@ -509,6 +511,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 9007199254740991
             default: 0
       responses:
         "200":
@@ -685,7 +688,7 @@ paths:
           schema:
             type: integer
             minimum: 0
-            maximum: 100
+            maximum: 9007199254740991
             default: 20
         - description: Cantidad de ítems a saltear
           in: query
@@ -693,6 +696,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 9007199254740991
             default: 0
       responses:
         "200":
@@ -807,7 +811,7 @@ paths:
           schema:
             type: integer
             minimum: 0
-            maximum: 100
+            maximum: 9007199254740991
             default: 20
         - description: Cantidad de ítems a saltear
           in: query
@@ -815,6 +819,7 @@ paths:
           schema:
             type: integer
             minimum: 0
+            maximum: 9007199254740991
             default: 0
       responses:
         "200":

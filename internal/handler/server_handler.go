@@ -40,8 +40,8 @@ func (h *ServerHandler) Register(admin *gin.RouterGroup) {
 // @Security     BearerAuth
 // @Param        search  query  string  false  "Texto a buscar en el nombre del servidor (parcial, sin distinguir mayúsculas). Los caracteres `%`, `_` y `\` se toman como texto literal." maxlength(100)
 // @Param        status  query  string  false  "Deja solo los servidores activos o solo los suspendidos. Sin este parámetro se listan todos; otro valor da `400 INVALID_QUERY`." Enums(active, suspended)
-// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(100) default(20)
-// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) default(0)
+// @Param        limit   query  int  false  "Tamaño de página (máximo 100; un valor mayor se acota a 100)" minimum(0) maximum(9007199254740991) default(20)
+// @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) maximum(9007199254740991) default(0)
 // @Success      200  {object}  model.ServerList  "Servidores que cumplen el filtro (puede ser una lista vacía)"
 // @Failure      400  {object}  apierr.ErrorResponse  "Parámetros de consulta inválidos (`INVALID_QUERY`)"
 // @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
@@ -60,10 +60,14 @@ func (h *ServerHandler) List(c *gin.Context) {
 	if !ok {
 		return
 	}
+	status, ok := statusQuery(c)
+	if !ok {
+		return
+	}
 
 	list, err := h.servers.List(c.Request.Context(), service.ListServersParams{
 		Search: search,
-		Status: model.ServerStatus(c.Query("status")),
+		Status: model.ServerStatus(status),
 		Limit:  limit,
 		Offset: offset,
 	})

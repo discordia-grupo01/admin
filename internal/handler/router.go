@@ -40,6 +40,8 @@ func NewRouter(deps Deps, registrars ...RouteRegistrar) *gin.Engine {
 		register(admin)
 	}
 
+	r.HandleMethodNotAllowed = true
+	r.NoMethod(apierr.MethodNotAllowed)
 	r.NoRoute(apierr.NotFound)
 	return r
 }
