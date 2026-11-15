@@ -123,6 +123,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Instalar el cliente de Postgres (carga de datos de prueba)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
       - name: Migrar la base
         env:
           DATABASE_HOST: localhost

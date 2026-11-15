@@ -61,6 +61,11 @@ else
   docker exec -i contract-admin-pg psql -q -v ON_ERROR_STOP=1 -U discordia     -d discordia_admin_contract <scripts/contract/seed.sql >/dev/null
 fi
 
+if curl -fsS "http://127.0.0.1:$APP_PORT/livez" >/dev/null 2>&1; then
+  echo "contract-test: el puerto $APP_PORT ya está en uso (¿quedó un servicio de una corrida anterior?)." >&2
+  exit 1
+fi
+
 go build -o .contract-api ./cmd/api
 ./.contract-api >"$LOG" 2>&1 &
 APP_PID=$!
