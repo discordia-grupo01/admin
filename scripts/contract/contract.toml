@@ -1,0 +1,11 @@
+# Configuracion de la pasada 1 de los tests de contrato (ids inventados).
+#
+# Eliminar un servidor exige confirmar con el nombre exacto: un nombre inventado
+# se rechaza con 400 DELETE_CONFIRMATION_MISMATCH, que es la regla de negocio y
+# no un error del contrato. La pasada 2 (seeded.toml) manda el nombre correcto.
+[[operations]]
+include-path = "/v1/admin/servers/{id}"
+include-method = "DELETE"
+
+[operations.checks.positive_data_acceptance]
+enabled = false

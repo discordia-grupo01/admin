@@ -173,6 +173,20 @@ El repositorio se formatea con gofmt. Activá el hook una vez por clon:
 git config core.hooksPath .githooks
 ```
 
+### Tests de contrato
+
+`openapi.yaml` se genera desde el código (`make openapi`) y se valida con [Schemathesis](https://schemathesis.readthedocs.io): genera casos a partir del contrato, los manda al servicio y verifica que las respuestas (códigos, esquemas, cabeceras) coincidan con lo declarado.
+
+```bash
+make contract-deps-up   # Postgres (55501) y RabbitMQ (55511) efímeros en Docker, con migraciones
+make contract-test      # levanta el servicio en 18081 y corre Schemathesis
+make contract-deps-down
+```
+
+El script solo corre contra servicios locales y rechaza cualquier otro host. Usa secretos de juguete y un staff de prueba; no toca ningún entorno real. `CONTRACT_MAX_EXAMPLES` ajusta los casos por operación (25 por defecto). En el CI corre el job `contract`, en paralelo a `test` y sin `secrets`.
+
+Corre dos pasadas. La primera usa ids inventados y cubre los caminos de error. La segunda carga `scripts/contract/seed.sql` en la base efímera y usa esos ids (`scripts/contract/seeded.toml`) para llegar a la lógica real de expedientes, suspensiones y recuperación de cuenta.
+
 ## Más documentación
 
 En este repositorio:

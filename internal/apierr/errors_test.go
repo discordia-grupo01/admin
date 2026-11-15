@@ -37,7 +37,7 @@ func TestParseNonNegativeIntQuery(t *testing.T) {
 }
 
 func TestParseNonNegativeIntQueryRejectsInvalid(t *testing.T) {
-	for _, query := range []string{"?limit=-1", "?limit=abc", "?limit=1.5", "?limit=%20"} {
+	for _, query := range []string{"?limit=-1", "?limit=abc", "?limit=1.5", "?limit=%20", "?limit=", "?limit=9007199254740992"} {
 		_, ok, w := parse(query)
 		if ok {
 			t.Errorf("%q debería ser inválido", query)

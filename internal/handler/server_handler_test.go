@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -150,5 +151,25 @@ func TestListServersRequiresStaff(t *testing.T) {
 				t.Error("el servicio no debe ejecutarse sin autorización")
 			}
 		})
+	}
+}
+
+func TestListServersRejectsEmptyStatus(t *testing.T) {
+	w := get(serversRouter(&fakeServerLister{list: &model.ServerList{}}), "/v1/admin/servers?status=", bearer(t, staffID))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMethodNotAllowedReturnsJSON(t *testing.T) {
+	w := get(serversRouter(&fakeServerLister{list: &model.ServerList{}}), "/livez", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /livez = %d", w.Code)
+	}
+	req := httptest.NewRequest(http.MethodTrace, "/livez", nil)
+	rec := httptest.NewRecorder()
+	serversRouter(&fakeServerLister{list: &model.ServerList{}}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed || !strings.Contains(rec.Body.String(), "METHOD_NOT_ALLOWED") {
+		t.Fatalf("TRACE /livez = %d: %s", rec.Code, rec.Body.String())
 	}
 }
