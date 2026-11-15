@@ -140,6 +140,28 @@ func TestAdminGroupRequiresAuthAndStaff(t *testing.T) {
 	}
 }
 
+func TestMeAnswersWhetherCallerIsStaff(t *testing.T) {
+	r := newTestRouter(NewHealthHandler())
+
+	cases := []struct {
+		name   string
+		auth   string
+		status int
+	}{
+		{"sin token", "", http.StatusUnauthorized},
+		{"usuario que no es staff", bearer(t, userID), http.StatusForbidden},
+		{"staff", bearer(t, staffID), http.StatusNoContent},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := get(r, "/v1/admin/me", tc.auth)
+			if w.Code != tc.status {
+				t.Fatalf("status = %d, quería %d (%s)", w.Code, tc.status, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestUnknownRouteUsesErrorFormat(t *testing.T) {
 	w := get(newTestRouter(NewHealthHandler()), "/v1/no-existe", "")
 	var body apierr.ErrorResponse
