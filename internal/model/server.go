@@ -18,15 +18,18 @@ func (s ServerStatus) Valid() bool {
 
 // Server es un servidor tal como lo ve el backoffice.
 type Server struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	OwnerID string `json:"owner_id"`
+	ID   string `json:"id" format:"uuid"`
+	Name string `json:"name"`
+	// IconURL es la dirección del ícono tal como la guarda servers (URL pública
+	// o ruta del gateway), o null si no tiene o todavía no llegó a la réplica.
+	IconURL *string `json:"icon_url" extensions:"x-nullable"`
+	OwnerID string  `json:"owner_id" format:"uuid"`
 	// OwnerName es null si el perfil del dueño todavía no llegó a la réplica.
-	OwnerName   *string   `json:"owner_name"`
+	OwnerName   *string   `json:"owner_name" extensions:"x-nullable"`
 	MemberCount int       `json:"member_count"`
-	CreatedAt   time.Time `json:"created_at"`
+	CreatedAt   time.Time `json:"created_at" format:"date-time"`
 	// SuspendedAt es null si el servidor no está suspendido.
-	SuspendedAt *time.Time `json:"suspended_at"`
+	SuspendedAt *time.Time `json:"suspended_at" format:"date-time" extensions:"x-nullable"`
 }
 
 // ServerList es una página del listado de servidores.

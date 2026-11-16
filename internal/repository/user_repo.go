@@ -32,9 +32,12 @@ type Registration struct {
 
 // Profile es la parte del perfil público que admin guarda (users.profile_updated).
 type Profile struct {
-	UserID  string
-	Name    string
-	Version int64
+	UserID string
+	Name   string
+	// AvatarURL es la dirección de la foto tal como la publica identify, o
+	// vacío si no tiene.
+	AvatarURL string
+	Version   int64
 }
 
 type UserRepository interface {
@@ -53,6 +56,8 @@ type UserRepository interface {
 	MarkEmailVerified(ctx context.Context, userID string) error
 	// UpsertProfile aplica la foto del perfil solo si su versión es mayor a la
 	// guardada, así un evento repetido o fuera de orden no pisa datos nuevos.
+	// Con la misma versión se aplica solo si todavía no se conoce el avatar
+	// (lo completa el backfill de identify).
 	UpsertProfile(ctx context.Context, p Profile) error
 
 	// List devuelve una página de usuarios que cumplen el filtro, del más
@@ -123,16 +128,19 @@ func (r *postgresUserRepository) MarkEmailVerified(ctx context.Context, userID s
 }
 
 func (r *postgresUserRepository) UpsertProfile(ctx context.Context, p Profile) error {
-	// El WHERE del DO UPDATE descarta las fotos con versión igual o menor.
+	// El WHERE del DO UPDATE descarta las fotos con versión menor, y las de
+	// versión igual una vez que el avatar ya se conoce (avatar_url no nulo).
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO users (user_id, name, profile_version)
-		VALUES ($1, $2, $3)
+		INSERT INTO users (user_id, name, avatar_url, profile_version)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (user_id) DO UPDATE SET
 			name            = EXCLUDED.name,
+			avatar_url      = EXCLUDED.avatar_url,
 			profile_version = EXCLUDED.profile_version,
 			updated_at      = now()
-		WHERE users.profile_version < EXCLUDED.profile_version`,
-		p.UserID, p.Name, p.Version)
+		WHERE users.profile_version < EXCLUDED.profile_version
+		   OR (users.profile_version = EXCLUDED.profile_version AND users.avatar_url IS NULL)`,
+		p.UserID, p.Name, p.AvatarURL, p.Version)
 	if err != nil {
 		return fmt.Errorf("guardar el perfil de %s: %w", p.UserID, err)
 	}
@@ -174,7 +182,7 @@ func (r *postgresUserRepository) List(ctx context.Context, filter UserFilter, li
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT user_id, name, email,`+userStatusExpr+`, registered_at, suspended_at
+		SELECT user_id, name, email, avatar_url,`+userStatusExpr+`, registered_at, suspended_at
 		  FROM users
 		 WHERE`+userFilterClause+`
 		 ORDER BY registered_at DESC, user_id
@@ -188,11 +196,11 @@ func (r *postgresUserRepository) List(ctx context.Context, filter UserFilter, li
 	users := []model.User{}
 	for rows.Next() {
 		var u model.User
-		var name, email sql.NullString
-		if err := rows.Scan(&u.ID, &name, &email, &u.Status, &u.CreatedAt, &u.SuspendedAt); err != nil {
+		var name, email, avatarURL sql.NullString
+		if err := rows.Scan(&u.ID, &name, &email, &avatarURL, &u.Status, &u.CreatedAt, &u.SuspendedAt); err != nil {
 			return nil, 0, fmt.Errorf("leer un usuario: %w", err)
 		}
-		u.Name, u.Email = name.String, email.String
+		u.Name, u.Email, u.AvatarURL = name.String, email.String, optionalText(avatarURL)
 		u.CreatedAt = u.CreatedAt.UTC()
 		if u.SuspendedAt != nil {
 			t := u.SuspendedAt.UTC()
@@ -204,4 +212,13 @@ func (r *postgresUserRepository) List(ctx context.Context, filter UserFilter, li
 		return nil, 0, err
 	}
 	return users, total, nil
+}
+
+// optionalText convierte una columna de texto en un puntero: nil si es NULL o
+// vacía.
+func optionalText(v sql.NullString) *string {
+	if !v.Valid || v.String == "" {
+		return nil
+	}
+	return &v.String
 }

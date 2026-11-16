@@ -251,3 +251,34 @@ func TestServerListHidesServersWithoutSnapshot(t *testing.T) {
 		t.Fatalf("la membresía previa debe contarse al llegar la foto: %+v err=%v", got, err)
 	}
 }
+
+func TestUpsertServerStoresTheIconOfTheNewestSnapshot(t *testing.T) {
+	repo, _ := newServerRepo(t)
+	ctx := context.Background()
+	withIcon := func(s repository.ServerSnapshot, icon string) repository.ServerSnapshot {
+		s.IconURL = icon
+		return s
+	}
+	steps := []struct {
+		s    repository.ServerSnapshot
+		want string
+	}{
+		{snap(1, "Sala", 9, 0, 1), ""},
+		{withIcon(snap(1, "Sala", 9, 0, 10), "/v1/servers/x/icon?v=2"), "/v1/servers/x/icon?v=2"},
+		{withIcon(snap(1, "Sala", 9, 0, 5), "/v1/servers/x/icon?v=1"), "/v1/servers/x/icon?v=2"}, // llegó tarde: no pisa
+		{snap(1, "Sala", 9, 0, 20), ""}, // sacó el ícono
+	}
+	for i, st := range steps {
+		if err := repo.UpsertServer(ctx, st.s); err != nil {
+			t.Fatal(err)
+		}
+		got, _, err := repo.List(ctx, repository.ServerFilter{}, 10, 0)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("paso %d: %+v err=%v", i, got, err)
+		}
+		icon := got[0].IconURL
+		if st.want == "" && icon != nil || st.want != "" && (icon == nil || *icon != st.want) {
+			t.Fatalf("paso %d: icon_url = %v, quería %q", i, icon, st.want)
+		}
+	}
+}

@@ -117,6 +117,7 @@ func (h *ServerEventsHandler) serverUpdated(ctx context.Context, body []byte) er
 		OwnerID:    ownerID,
 		CreatedAt:  e.CreatedAt.UTC(),
 		OccurredAt: e.OccurredAt.UTC(),
+		IconURL:    strings.TrimSpace(e.IconURL),
 	})
 }
 

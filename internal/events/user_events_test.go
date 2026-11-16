@@ -153,3 +153,15 @@ func TestStoreErrorIsTransientNotDiscarded(t *testing.T) {
 		}
 	}
 }
+
+func TestProfileUpdatedKeepsTheAvatar(t *testing.T) {
+	sync := &fakeSync{}
+	body := `{"event_id":"e2","occurred_at":"2026-09-28T14:30:00Z","user_id":"` + validID + `","version":4,"name":"Manu P","avatar_url":"/uploads/profile-images/manu.png","description":"","status_text":"","status_emoji":""}`
+	if err := NewUserEventsHandler(sync).Handle(context.Background(), users.RoutingKeyProfileUpdated, []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	want := repository.Profile{UserID: validID, Name: "Manu P", AvatarURL: "/uploads/profile-images/manu.png", Version: 4}
+	if len(sync.profiles) != 1 || sync.profiles[0] != want {
+		t.Errorf("perfiles aplicados: %+v, quería %+v", sync.profiles, want)
+	}
+}

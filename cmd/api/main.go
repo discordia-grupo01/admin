@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/discordia-grupo01/admin/internal/changes"
 	"net/http"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/discordia-grupo01/admin/internal/changes"
 
 	"github.com/discordia-grupo01/admin/internal/audit"
 	"github.com/discordia-grupo01/admin/internal/config"
@@ -25,6 +26,18 @@ import (
 
 const shutdownTimeout = 10 * time.Second
 
+// @title        Discordia - Admin
+// @version      1.0.0
+// @description  API del backoffice de Discordia (épica Administración). Todos los endpoints `/v1/admin/*` requieren `Authorization: Bearer <JWT>` de un usuario que sea staff de la plataforma.
+// @description
+// @description  **Consistencia eventual**: suspender o reactivar (un usuario o un servidor) cambia el estado en admin al instante y publica un evento; los demás servicios lo aplican a los pocos instantes. Lo mismo al aprobar o rechazar una solicitud de recuperación de cuenta: identify desactiva el 2FA (o solo avisa al usuario) cuando procesa el evento.
+// @description
+// @description  **Expediente (#81)**: admin lo arma solo con datos locales, que le llegan por eventos (réplicas), así que puede ir unos segundos por detrás de los servicios de origen. Por minimización de datos nunca incluye el contenido de un mensaje, quién hizo un reporte ni quién aplicó una acción de moderación. La actividad de mensajes se conserva 90 días y empieza a registrarse desde el despliegue de esta versión; por eso un reporte de un mensaje anterior o más viejo que la retención no se puede atribuir a su autor (`reported_user_id: null`).
+// @BasePath     /
+// @securityDefinitions.apikey  BearerAuth
+// @in                          header
+// @name                        Authorization
+// @description                 Escribir "Bearer " seguido del JWT. El usuario del token tiene que ser staff de la plataforma.
 func main() {
 	logging.MustSetup("admin")
 	defer logging.Flush()

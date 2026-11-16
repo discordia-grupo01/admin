@@ -1,262 +1,610 @@
-openapi: 3.0.3
+openapi: 3.0.0
 info:
-  title: Discordia - Admin
-  version: "1.0.0"
-  description: |
+  contact: {}
+  description: >-
     API del backoffice de Discordia (épica Administración). Todos los endpoints
     `/v1/admin/*` requieren `Authorization: Bearer <JWT>` de un usuario que sea
     staff de la plataforma.
 
-    **Estado**: implementados todos los endpoints: `/livez`, `/readyz`,
-    `GET /v1/admin/users` (#31), `GET /v1/admin/servers` (#32),
-    `POST` / `DELETE /v1/admin/users/{id}/suspension` (#29 y #30),
-    `DELETE /v1/admin/servers/{id}` (#68) y
-    `POST` / `DELETE /v1/admin/servers/{id}/suspension` (#69) y
-    `GET /v1/admin/{users|servers}/{id}/dossier[/{section}]` (#81) y
-    `/v1/admin/recovery-requests` (recuperación de cuenta sin segundo factor).
 
-    **Consistencia eventual**: suspender o reactivar (un usuario o un servidor)
-    cambia el estado en admin al instante y publica un evento; los demás
-    servicios lo aplican a los pocos instantes. Lo mismo al aprobar o rechazar
-    una solicitud de recuperación de cuenta: identify desactiva el 2FA (o solo
-    avisa al usuario) cuando procesa el evento.
+    **Consistencia eventual**: suspender o reactivar (un usuario o un servidor) cambia el estado en admin al instante y publica un evento; los demás servicios lo aplican a los pocos instantes. Lo mismo al aprobar o rechazar una solicitud de recuperación de cuenta: identify desactiva el 2FA (o solo avisa al usuario) cuando procesa el evento.
 
-    **Expediente (#81)**: admin lo arma solo con datos locales, que le llegan
-    por eventos (réplicas), así que puede ir unos segundos por detrás de los
-    servicios de origen. Por minimización de datos nunca incluye el contenido de
-    un mensaje, quién hizo un reporte ni quién aplicó una acción de moderación.
-    La actividad de mensajes se conserva 90 días y empieza a registrarse desde
-    el despliegue de esta versión; por eso un reporte de un mensaje anterior o
-    más viejo que la retención no se puede atribuir a su autor
-    (`reported_user_id: null`).
-servers:
-  - url: /
-security:
-  - bearerAuth: []
-tags:
-  - name: Health
-  - name: Users
-  - name: Servers
-  - name: Dossier
-  - name: Recovery
+
+    **Expediente (#81)**: admin lo arma solo con datos locales, que le llegan por eventos (réplicas), así que puede ir unos segundos por detrás de los servicios de origen. Por minimización de datos nunca incluye el contenido de un mensaje, quién hizo un reporte ni quién aplicó una acción de moderación. La actividad de mensajes se conserva 90 días y empieza a registrarse desde el despliegue de esta versión; por eso un reporte de un mensaje anterior o más viejo que la retención no se puede atribuir a su autor (`reported_user_id: null`).
+  title: Discordia - Admin
+  version: 1.0.0
 paths:
   /livez:
     get:
-      tags: [Health]
-      summary: Liveness check
       description: Confirma que el proceso está vivo. No consulta dependencias.
-      security: []
       responses:
         "200":
           description: El proceso está vivo
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status: { type: string, example: alive }
+                $ref: "#/components/schemas/handler.statusResponse"
+      summary: Liveness check
+      tags:
+        - Health
   /readyz:
     get:
-      tags: [Health]
-      summary: Readiness check
       description: Confirma que las dependencias críticas (Postgres, RabbitMQ) responden.
-      security: []
       responses:
         "200":
           description: Listo para recibir tráfico
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status: { type: string, example: ready }
+                $ref: "#/components/schemas/handler.statusResponse"
         "503":
           description: Alguna dependencia no responde
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status: { type: string, example: unavailable }
-                  failed:
-                    type: array
-                    items: { type: string }
-                    example: [postgres]
-  /v1/admin/users:
+                $ref: "#/components/schemas/handler.unavailableResponse"
+      summary: Readiness check
+      tags:
+        - Health
+  /v1/admin/me:
     get:
-      tags: [Users]
-      summary: Listar usuarios con filtros (HU #31)
-      description: |
-        Lista paginada, ordenada por fecha de registro descendente. `search`
-        busca por email o nombre (parcial, sin distinguir mayúsculas).
-      parameters:
-        - name: search
-          in: query
-          schema: { type: string, maxLength: 100 }
-          description: Texto a buscar en el email o el nombre. Los caracteres `%`, `_` y `\` se toman como texto literal.
-        - name: status
-          in: query
-          schema: { $ref: "#/components/schemas/UserStatus" }
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+      description: El backoffice lo llama al iniciar sesión, después de validar las
+        credenciales con identify, para no dejar entrar a quien no es staff.
       responses:
-        "200":
-          description: Usuarios que cumplen los filtros (puede ser una lista vacía)
+        "204":
+          description: Quien llama es staff de la plataforma
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/UserList" }
-        "400": { $ref: "#/components/responses/InvalidQuery" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-  /v1/admin/users/{id}/suspension:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    post:
-      tags: [Users]
-      summary: Suspender a un usuario (HU #29)
-      description: |
-        Impide que el usuario inicie sesión y use la plataforma. El estado
-        cambia en admin al instante y, en la misma transacción, queda escrito
-        el evento `admin.user_suspended` (firmado con HMAC) para que lo publique
-        el outbox; los demás servicios lo aplican a los pocos instantes. No se
-        puede suspender a un miembro del staff (incluido uno mismo). Un `{id}`
-        que no es un UUID se trata como usuario inexistente.
-      responses:
-        "200":
-          description: Usuario suspendido
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/User" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
-          description: No es staff (`FORBIDDEN`) o el objetivo es staff (`CANNOT_SUSPEND_STAFF`)
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "404":
-          description: El usuario no existe (`USER_NOT_FOUND`)
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "409":
-          description: El usuario ya estaba suspendido (`USER_ALREADY_SUSPENDED`)
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-    delete:
-      tags: [Users]
-      summary: Reactivar a un usuario suspendido (HU #30)
-      description: |
-        Levanta la suspensión: el usuario vuelve a estar activo en admin al
-        instante y, en la misma transacción, queda escrito el evento
-        `admin.user_reactivated` (firmado con HMAC) para que lo publique el
-        outbox. Los demás servicios dejan de bloquear al usuario al procesarlo.
-        Un `{id}` que no es un UUID se trata como usuario inexistente.
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Verificar que quien llama es staff
+      tags:
+        - Session
+  /v1/admin/recovery-requests:
+    get:
+      description: Pedidos de usuarios con 2FA activo que perdieron la app
+        autenticadora y todos sus códigos de recuperación. Llegan de identify
+        por evento (`users.account_recovery_requested`). Lista paginada, de la
+        más reciente a la más vieja. `search` busca por email o nombre del
+        usuario (parcial, sin distinguir mayúsculas). El `total` con
+        `status=pending` sirve de contador de pendientes.
+      parameters:
+        - description: Texto a buscar en el email o el nombre del usuario. Los caracteres
+            `%`, `_` y `\` se toman como texto literal.
+          in: query
+          name: search
+          schema:
+            type: string
+            maxLength: 100
+        - description: Deja solo las solicitudes en ese estado. Sin este parámetro se
+            listan todas.
+          in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - pending
+              - approved
+              - rejected
+        - description: Tamaño de página (máximo 100; un valor mayor se acota a 100)
+          in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            default: 20
+        - description: Cantidad de ítems a saltear
+          in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            default: 0
       responses:
         "200":
-          description: Usuario reactivado
+          description: Solicitudes que cumplen los filtros (puede ser una lista vacía)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/User" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+              schema:
+                $ref: "#/components/schemas/model.RecoveryRequestList"
+        "400":
+          description: Parámetros de consulta inválidos (`INVALID_QUERY`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Listar solicitudes de recuperación de cuenta
+      tags:
+        - Recovery
+  "/v1/admin/recovery-requests/{id}":
+    get:
+      description: La solicitud con el usuario y cuántas solicitudes anteriores hizo.
+        Un `{id}` que no es un UUID se trata como inexistente.
+      parameters:
+        - description: ID de la solicitud
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: La solicitud
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.RecoveryRequestDetail"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
-          description: El usuario no existe (`USER_NOT_FOUND`)
+          description: La solicitud no existe (`RECOVERY_REQUEST_NOT_FOUND`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Detalle de una solicitud de recuperación de cuenta
+      tags:
+        - Recovery
+  "/v1/admin/recovery-requests/{id}/approval":
+    post:
+      description: "Marca la solicitud como aprobada por el staff que llama y, en la
+        misma transacción, deja escrito `admin.account_recovery_approved`
+        (firmado con HMAC) para que lo publique el outbox. identify, al
+        procesarlo, desactiva el 2FA del usuario, invalida sus códigos de
+        recuperación y le avisa por email. Solo se puede resolver una vez: si
+        dos miembros del staff la resuelven a la vez, uno recibe `409`."
+      parameters:
+        - description: ID de la solicitud
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Solicitud aprobada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.RecoveryRequestDetail"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "404":
+          description: La solicitud no existe (`RECOVERY_REQUEST_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
-          description: El usuario no estaba suspendido (`USER_NOT_SUSPENDED`)
+          description: La solicitud ya fue aprobada o rechazada
+            (`RECOVERY_REQUEST_ALREADY_RESOLVED`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Aprobar una solicitud de recuperación de cuenta
+      tags:
+        - Recovery
+  "/v1/admin/recovery-requests/{id}/rejection":
+    post:
+      description: Marca la solicitud como rechazada y deja escrito
+        `admin.account_recovery_rejected` (firmado). identify solo le avisa al
+        usuario por email; el 2FA sigue activo y el usuario puede volver a
+        pedirla.
+      parameters:
+        - description: ID de la solicitud
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Solicitud rechazada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.RecoveryRequestDetail"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "404":
+          description: La solicitud no existe (`RECOVERY_REQUEST_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "409":
+          description: La solicitud ya fue aprobada o rechazada
+            (`RECOVERY_REQUEST_ALREADY_RESOLVED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: Rechazar una solicitud de recuperación de cuenta
+      tags:
+        - Recovery
   /v1/admin/servers:
     get:
-      tags: [Servers]
-      summary: Listar los servidores de la plataforma (HU #32)
-      description: |
-        Lista paginada, ordenada por fecha de creación descendente. Un servidor
-        aparece cuando llega su alta a la réplica y desaparece cuando se elimina.
-        Los suspendidos siguen apareciendo, con `suspended_at` informado.
+      description: Lista paginada, ordenada por fecha de creación descendente. Un
+        servidor aparece cuando llega su alta a la réplica y desaparece cuando
+        se elimina. Los suspendidos siguen apareciendo, con `suspended_at`
+        informado.
       parameters:
-        - name: search
+        - description: Texto a buscar en el nombre del servidor (parcial, sin distinguir
+            mayúsculas). Los caracteres `%`, `_` y `\` se toman como texto
+            literal.
           in: query
-          schema: { type: string, maxLength: 100 }
-          description: Texto a buscar en el nombre del servidor (parcial, sin distinguir mayúsculas). Los caracteres `%`, `_` y `\` se toman como texto literal.
-        - name: status
+          name: search
+          schema:
+            type: string
+            maxLength: 100
+        - description: Deja solo los servidores activos o solo los suspendidos. Sin este
+            parámetro se listan todos; otro valor da `400 INVALID_QUERY`.
           in: query
-          schema: { type: string, enum: [active, suspended] }
-          description: Deja solo los servidores activos o solo los suspendidos. Sin este parámetro se listan todos; otro valor da `400 INVALID_QUERY`.
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+          name: status
+          schema:
+            type: string
+            enum:
+              - active
+              - suspended
+        - description: Tamaño de página (máximo 100; un valor mayor se acota a 100)
+          in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            default: 20
+        - description: Cantidad de ítems a saltear
+          in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            default: 0
       responses:
         "200":
           description: Servidores que cumplen el filtro (puede ser una lista vacía)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ServerList" }
-        "400": { $ref: "#/components/responses/InvalidQuery" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-  /v1/admin/servers/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
+              schema:
+                $ref: "#/components/schemas/model.ServerList"
+        "400":
+          description: Parámetros de consulta inválidos (`INVALID_QUERY`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: "Listar los servidores de la plataforma (HU #32)"
+      tags:
+        - Servers
+  "/v1/admin/servers/{id}":
     delete:
-      tags: [Servers]
-      summary: Eliminar un servidor desde el backoffice (HU #68)
-      description: |
+      description: >-
         Pide la eliminación definitiva del servidor con todos sus canales,
         mensajes y roles. El staff confirma escribiendo el nombre del servidor
-        (`confirm_name`), que se compara sin espacios en los bordes y distinguiendo
-        mayúsculas contra el nombre que admin tiene replicado.
+        (`confirm_name`), que se compara sin espacios en los bordes y
+        distinguiendo mayúsculas contra el nombre que admin tiene replicado.
 
-        Admin **no borra nada**: registra el pedido y, en la misma transacción,
-        deja escrito el evento `admin.server_deletion_requested` (firmado con
-        HMAC) para que lo publique el outbox. `servers` ejecuta el borrado y
-        avisa con `servers.server_deleted`; recién entonces el servidor
-        desaparece de `GET /v1/admin/servers`. Hasta ese momento (normalmente
-        unos segundos) sigue en el listado. Si el evento se pierde el servidor
-        no se borra y el pedido se puede repetir: cada pedido publica un evento
-        con una `version` mayor y `servers` es idempotente.
 
-        Es irreversible. Un `{id}` que no es un UUID se trata como servidor
-        inexistente. Sin `confirm_name` o con un nombre distinto no se hace nada.
+        Admin **no borra nada**: registra el pedido y, en la misma transacción, deja escrito el evento `admin.server_deletion_requested` (firmado con HMAC) para que lo publique el outbox. `servers` ejecuta el borrado y avisa con `servers.server_deleted`; recién entonces el servidor desaparece de `GET /v1/admin/servers`. Hasta ese momento (normalmente unos segundos) sigue en el listado. Si el evento se pierde el servidor no se borra y el pedido se puede repetir: cada pedido publica un evento con una `version` mayor y `servers` es idempotente.
+
+
+        Es irreversible. Un `{id}` que no es un UUID se trata como servidor inexistente. Sin `confirm_name` o con un nombre distinto no se hace nada.
+      parameters:
+        - description: ID del servidor
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
       requestBody:
-        required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/DeleteServerRequest" }
+            schema:
+              $ref: "#/components/schemas/handler.deleteServerRequest"
+        description: Confirmación con el nombre del servidor
+        required: true
       responses:
         "202":
-          description: Pedido aceptado; la eliminación se completa de forma asíncrona. Sin cuerpo.
+          description: Pedido aceptado; la eliminación se completa de forma asíncrona. Sin
+            cuerpo.
         "400":
-          description: El cuerpo no es un JSON válido (`INVALID_BODY`) o `confirm_name` falta o no es el nombre del servidor (`DELETE_CONFIRMATION_MISMATCH`, con `details.field = "confirm_name"`)
+          description: El cuerpo no es un JSON válido (`INVALID_BODY`) o `confirm_name`
+            falta o no es el nombre del servidor
+            (`DELETE_CONFIRMATION_MISMATCH`, con `details.field = confirm_name`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
-          description: El servidor no existe, todavía no llegó a la réplica o ya fue eliminado (`SERVER_NOT_FOUND`)
+          description: El servidor no existe, todavía no llegó a la réplica o ya fue
+            eliminado (`SERVER_NOT_FOUND`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-  /v1/admin/servers/{id}/suspension:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: "Eliminar un servidor desde el backoffice (HU #68)"
+      tags:
+        - Servers
+  "/v1/admin/servers/{id}/dossier":
+    get:
+      description: >-
+        Resumen para investigar un servidor: sus datos (fecha de creación,
+        miembros, dueño, estado), los mensajes enviados en cada uno de los
+        últimos 7 días y, de reportes y moderación, el total y los 5 ítems más
+        recientes.
+
+
+        Los días de `messaging` son días **UTC**: un mensaje enviado a las 22 h en UTC-3 cuenta para el día siguiente. Siempre vienen los 7 días, del más viejo al más nuevo, con `messages: 0` donde no hubo actividad.
+
+
+        Un servidor eliminado responde `404`: servers lo borra de forma permanente y admin descarta sus reportes, su actividad y las acciones de sus moderadores. Se conservan las acciones del staff sobre el servidor en el expediente de los usuarios afectados.
+      parameters:
+        - description: ID del servidor
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Resumen del expediente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.ServerDossierSummary"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "404":
+          description: El servidor no existe, todavía no llegó su alta o fue eliminado
+            (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: "Expediente de investigación de un servidor (HU #81)"
+      tags:
+        - Dossier
+  "/v1/admin/servers/{id}/dossier/{section}":
+    get:
+      description: Ordenada de la más nueva a la más vieja. En `moderation` hay
+        acciones del staff sobre el servidor (suspender, reactivar, pedir su
+        eliminación) y las de sus moderadores sobre sus miembros. Los `items`
+        son reportes o acciones de moderación, según la sección.
+      parameters:
+        - description: ID del servidor
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - description: Sección del expediente
+          in: path
+          name: section
+          required: true
+          schema:
+            type: string
+            enum:
+              - reports
+              - moderation
+        - description: Tamaño de página (máximo 100; un valor mayor se acota a 100)
+          in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            default: 20
+        - description: Cantidad de ítems a saltear
+          in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            default: 0
+      responses:
+        "200":
+          description: Una página de la sección (puede ser vacía)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/handler.sectionPage"
+        "400":
+          description: La sección no existe (`INVALID_SECTION`) o `limit` / `offset` son
+            inválidos (`INVALID_QUERY`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "404":
+          description: El servidor no existe o fue eliminado (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: "Una sección del expediente de un servidor, paginada (HU #81)"
+      tags:
+        - Dossier
+  "/v1/admin/servers/{id}/suspension":
+    delete:
+      description: Sus miembros recuperan el acceso normal. El servidor vuelve a estar
+        activo en admin al instante y, en la misma transacción, queda escrito el
+        evento `admin.server_reactivated` (firmado con HMAC), con una `version`
+        mayor que la de la suspensión. Los demás servicios dejan de bloquearlo
+        al procesarlo. Un `{id}` que no es un UUID se trata como servidor
+        inexistente.
+      parameters:
+        - description: ID del servidor
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Servidor reactivado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/model.Server"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "404":
+          description: El servidor no existe, todavía no llegó a la réplica o ya fue
+            eliminado (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "409":
+          description: El servidor no estaba suspendido (`SERVER_NOT_SUSPENDED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: "Levantar la suspensión de un servidor (HU #69)"
+      tags:
+        - Servers
     post:
-      tags: [Servers]
-      summary: Suspender un servidor (HU #69)
-      description: |
+      description: >-
         Bloquea el uso del servidor sin eliminarlo: ningún miembro, ni su owner,
         puede leer, escribir, entrar a voz, invitar, editar, transferir ni
         eliminarlo (salvo abandonarlo), pero su contenido se conserva. El estado
@@ -265,680 +613,1005 @@ paths:
         el outbox; servers, messaging y voz lo aplican a los pocos instantes. El
         servidor sigue en `GET /v1/admin/servers`, con `suspended_at` informado.
 
-        Se puede suspender un servidor de cualquier dueño. Un `{id}` que no es un
-        UUID se trata como servidor inexistente.
+
+        Se puede suspender un servidor de cualquier dueño. Un `{id}` que no es un UUID se trata como servidor inexistente.
+      parameters:
+        - description: ID del servidor
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: Servidor suspendido
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Server" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404":
-          description: El servidor no existe, todavía no llegó a la réplica o ya fue eliminado (`SERVER_NOT_FOUND`)
+              schema:
+                $ref: "#/components/schemas/model.Server"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "404":
+          description: El servidor no existe, todavía no llegó a la réplica o ya fue
+            eliminado (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: El servidor ya estaba suspendido (`SERVER_ALREADY_SUSPENDED`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-    delete:
-      tags: [Servers]
-      summary: Levantar la suspensión de un servidor (HU #69)
-      description: |
-        Sus miembros recuperan el acceso normal. El servidor vuelve a estar
-        activo en admin al instante y, en la misma transacción, queda escrito el
-        evento `admin.server_reactivated` (firmado con HMAC), con una `version`
-        mayor que la de la suspensión. Los demás servicios dejan de bloquearlo
-        al procesarlo. Un `{id}` que no es un UUID se trata como servidor
-        inexistente.
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: "Suspender un servidor (HU #69)"
+      tags:
+        - Servers
+  /v1/admin/users:
+    get:
+      description: Lista paginada, ordenada por fecha de registro descendente.
+        `search` busca por email o nombre (parcial, sin distinguir mayúsculas).
+      parameters:
+        - description: Texto a buscar en el email o el nombre. Los caracteres `%`, `_` y
+            `\` se toman como texto literal.
+          in: query
+          name: search
+          schema:
+            type: string
+            maxLength: 100
+        - description: Deja solo los usuarios en ese estado. Sin este parámetro se listan
+            todos.
+          in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - active
+              - pending
+              - suspended
+        - description: Tamaño de página (máximo 100; un valor mayor se acota a 100)
+          in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            default: 20
+        - description: Cantidad de ítems a saltear
+          in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            default: 0
       responses:
         "200":
-          description: Servidor reactivado
+          description: Usuarios que cumplen los filtros (puede ser una lista vacía)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Server" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404":
-          description: El servidor no existe, todavía no llegó a la réplica o ya fue eliminado (`SERVER_NOT_FOUND`)
+              schema:
+                $ref: "#/components/schemas/model.UserList"
+        "400":
+          description: Parámetros de consulta inválidos (`INVALID_QUERY`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "409":
-          description: El servidor no estaba suspendido (`SERVER_NOT_SUSPENDED`)
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-  /v1/admin/users/{id}/dossier:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: "Listar usuarios con filtros (HU #31)"
+      tags:
+        - Users
+  "/v1/admin/users/{id}/dossier":
     get:
-      tags: [Dossier]
-      summary: Expediente de investigación de un usuario (HU #81)
-      description: |
+      description: >-
         Resumen para investigar a un usuario: su estado y fecha de registro, la
         fecha de su última actividad y, de cada sección (`servers`, `activity`,
-        `reports`, `moderation`), el total y los 5 ítems más recientes. Para ver
-        más de una sección se pagina con `GET .../dossier/{section}`.
+        `reports`, `moderation`, `recovery_requests`), el total y los 5 ítems
+        más recientes. Para ver más de una sección se pagina con `GET
+        .../dossier/{section}`.
 
-        Las acciones de moderación mezclan las del staff de la plataforma
-        (`scope: platform`) con las de los moderadores de cada servidor
-        (`scope: server`). Los reportes incluyen los hechos contra el usuario y
-        los de mensajes que escribió.
+
+        Las acciones de moderación mezclan las del staff de la plataforma (`scope: platform`) con las de los moderadores de cada servidor (`scope: server`). Los reportes incluyen los hechos contra el usuario y los de mensajes que escribió.
+      parameters:
+        - description: ID del usuario
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: Resumen del expediente
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/UserDossierSummary" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404":
-          description: El usuario no existe, o todavía no llegó su registro (`USER_NOT_FOUND`)
+              schema:
+                $ref: "#/components/schemas/model.UserDossierSummary"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-  /v1/admin/users/{id}/dossier/{section}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-      - name: section
-        in: path
-        required: true
-        schema: { type: string, enum: [servers, activity, reports, moderation, recovery_requests] }
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "404":
+          description: El usuario no existe, o todavía no llegó su registro
+            (`USER_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: "Expediente de investigación de un usuario (HU #81)"
+      tags:
+        - Dossier
+  "/v1/admin/users/{id}/dossier/{section}":
     get:
-      tags: [Dossier]
-      summary: Una sección del expediente de un usuario, paginada (HU #81)
-      description: Ordenada de la más nueva a la más vieja.
+      description: "Ordenada de la más nueva a la más vieja. Los `items` dependen de
+        la sección: `servers` (membresías), `activity` (actividad), `reports`
+        (reportes), `moderation` (acciones de moderación) o `recovery_requests`
+        (solicitudes de recuperación de cuenta). El esquema de cada ítem es el
+        de las listas `latest` del resumen."
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        - description: ID del usuario
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - description: Sección del expediente
+          in: path
+          name: section
+          required: true
+          schema:
+            type: string
+            enum:
+              - servers
+              - activity
+              - reports
+              - moderation
+              - recovery_requests
+        - description: Tamaño de página (máximo 100; un valor mayor se acota a 100)
+          in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            default: 20
+        - description: Cantidad de ítems a saltear
+          in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+            default: 0
       responses:
         "200":
           description: Una página de la sección (puede ser vacía)
           content:
             application/json:
               schema:
-                oneOf:
-                  - { $ref: "#/components/schemas/DossierMembershipPage" }
-                  - { $ref: "#/components/schemas/DossierActivityPage" }
-                  - { $ref: "#/components/schemas/DossierReportPage" }
-                  - { $ref: "#/components/schemas/DossierModerationPage" }
-                  - { $ref: "#/components/schemas/DossierRecoveryRequestPage" }
+                $ref: "#/components/schemas/handler.sectionPage"
         "400":
-          description: La sección no existe (`INVALID_SECTION`) o `limit` / `offset` son inválidos (`INVALID_QUERY`)
+          description: La sección no existe (`INVALID_SECTION`) o `limit` / `offset` son
+            inválidos (`INVALID_QUERY`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
           description: El usuario no existe (`USER_NOT_FOUND`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-  /v1/admin/servers/{id}/dossier:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      tags: [Dossier]
-      summary: Expediente de investigación de un servidor (HU #81)
-      description: |
-        Resumen para investigar un servidor: sus datos (fecha de creación,
-        miembros, dueño, estado), los mensajes enviados en cada uno de los
-        últimos 7 días y, de reportes y moderación, el total y los 5 ítems más
-        recientes.
-
-        Los días de `messaging` son días **UTC**: un mensaje enviado a las 22 h
-        en UTC-3 cuenta para el día siguiente. Siempre vienen los 7 días, del
-        más viejo al más nuevo, con `messages: 0` donde no hubo actividad.
-
-        Un servidor eliminado responde `404`: servers lo borra de forma
-        permanente y admin descarta sus reportes, su actividad y las acciones de
-        sus moderadores. Se conservan las acciones del staff sobre el servidor
-        en el expediente de los usuarios afectados.
-      responses:
-        "200":
-          description: Resumen del expediente
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ServerDossierSummary" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404":
-          description: El servidor no existe, todavía no llegó su alta o fue eliminado (`SERVER_NOT_FOUND`)
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-  /v1/admin/servers/{id}/dossier/{section}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-      - name: section
-        in: path
-        required: true
-        schema: { type: string, enum: [reports, moderation] }
-    get:
-      tags: [Dossier]
-      summary: Una sección del expediente de un servidor, paginada (HU #81)
-      description: |
-        Ordenada de la más nueva a la más vieja. En `moderation` hay acciones del
-        staff sobre el servidor (suspender, reactivar, pedir su eliminación) y
-        las de sus moderadores sobre sus miembros.
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: "Una sección del expediente de un usuario, paginada (HU #81)"
+      tags:
+        - Dossier
+  "/v1/admin/users/{id}/suspension":
+    delete:
+      description: "Levanta la suspensión: el usuario vuelve a estar activo en admin
+        al instante y, en la misma transacción, queda escrito el evento
+        `admin.user_reactivated` (firmado con HMAC) para que lo publique el
+        outbox. Los demás servicios dejan de bloquear al usuario al procesarlo.
+        Un `{id}` que no es un UUID se trata como usuario inexistente."
       parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        - description: ID del usuario
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
-          description: Una página de la sección (puede ser vacía)
+          description: Usuario reactivado
           content:
             application/json:
               schema:
-                oneOf:
-                  - { $ref: "#/components/schemas/DossierReportPage" }
-                  - { $ref: "#/components/schemas/DossierModerationPage" }
-        "400":
-          description: La sección no existe (`INVALID_SECTION`) o `limit` / `offset` son inválidos (`INVALID_QUERY`)
+                $ref: "#/components/schemas/model.User"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
-          description: El servidor no existe o fue eliminado (`SERVER_NOT_FOUND`)
+          description: El usuario no existe (`USER_NOT_FOUND`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-  /v1/admin/recovery-requests:
-    get:
-      tags: [Recovery]
-      summary: Listar solicitudes de recuperación de cuenta
-      description: |
-        Pedidos de usuarios con 2FA activo que perdieron la app autenticadora y
-        todos sus códigos de recuperación. Llegan de identify por evento
-        (`users.account_recovery_requested`). Lista paginada, de la más reciente
-        a la más vieja. `search` busca por email o nombre del usuario (parcial,
-        sin distinguir mayúsculas). El `total` con `status=pending` sirve de
-        contador de pendientes.
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "409":
+          description: El usuario no estaba suspendido (`USER_NOT_SUSPENDED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: "Reactivar a un usuario suspendido (HU #30)"
+      tags:
+        - Users
+    post:
+      description: Impide que el usuario inicie sesión y use la plataforma. El estado
+        cambia en admin al instante y, en la misma transacción, queda escrito el
+        evento `admin.user_suspended` (firmado con HMAC) para que lo publique el
+        outbox; los demás servicios lo aplican a los pocos instantes. No se
+        puede suspender a un miembro del staff (incluido uno mismo). Un `{id}`
+        que no es un UUID se trata como usuario inexistente.
       parameters:
-        - name: search
-          in: query
-          schema: { type: string, maxLength: 100 }
-          description: Texto a buscar en el email o el nombre del usuario. Los caracteres `%`, `_` y `\` se toman como texto literal.
-        - name: status
-          in: query
-          schema: { $ref: "#/components/schemas/RecoveryRequestStatus" }
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        - description: ID del usuario
+          in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
-          description: Solicitudes que cumplen los filtros (puede ser una lista vacía)
+          description: Usuario suspendido
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RecoveryRequestList" }
-        "400": { $ref: "#/components/responses/InvalidQuery" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-  /v1/admin/recovery-requests/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    get:
-      tags: [Recovery]
-      summary: Detalle de una solicitud de recuperación de cuenta
-      description: La solicitud con el usuario y cuántas solicitudes anteriores hizo. Un `{id}` que no es un UUID se trata como inexistente.
-      responses:
-        "200":
-          description: La solicitud
+              schema:
+                $ref: "#/components/schemas/model.User"
+        "401":
+          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RecoveryRequestDetail" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/RecoveryRequestNotFound" }
-  /v1/admin/recovery-requests/{id}/approval:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    post:
-      tags: [Recovery]
-      summary: Aprobar una solicitud de recuperación de cuenta
-      description: |
-        Marca la solicitud como aprobada por el staff que llama y, en la misma
-        transacción, deja escrito `admin.account_recovery_approved` (firmado con
-        HMAC) para que lo publique el outbox. identify, al procesarlo, desactiva
-        el 2FA del usuario, invalida sus códigos de recuperación y le avisa por
-        email. Solo se puede resolver una vez: si dos miembros del staff la
-        resuelven a la vez, uno recibe `409`.
-      responses:
-        "200":
-          description: Solicitud aprobada
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "403":
+          description: No es staff (`FORBIDDEN`) o el objetivo es staff
+            (`CANNOT_SUSPEND_STAFF`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RecoveryRequestDetail" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/RecoveryRequestNotFound" }
-        "409": { $ref: "#/components/responses/RecoveryRequestAlreadyResolved" }
-  /v1/admin/recovery-requests/{id}/rejection:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, format: uuid }
-    post:
-      tags: [Recovery]
-      summary: Rechazar una solicitud de recuperación de cuenta
-      description: |
-        Marca la solicitud como rechazada y deja escrito
-        `admin.account_recovery_rejected` (firmado). identify solo le avisa al
-        usuario por email; el 2FA sigue activo y el usuario puede volver a pedirla.
-      responses:
-        "200":
-          description: Solicitud rechazada
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "404":
+          description: El usuario no existe (`USER_NOT_FOUND`)
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RecoveryRequestDetail" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/RecoveryRequestNotFound" }
-        "409": { $ref: "#/components/responses/RecoveryRequestAlreadyResolved" }
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "409":
+          description: El usuario ya estaba suspendido (`USER_ALREADY_SUSPENDED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+      security:
+        - BearerAuth: []
+      summary: "Suspender a un usuario (HU #29)"
+      tags:
+        - Users
+servers:
+  - url: /
 components:
   securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-  parameters:
-    Limit:
-      name: limit
-      in: query
-      schema: { type: integer, minimum: 0, maximum: 100, default: 20 }
-      description: Tamaño de página (máximo 100; un valor mayor se acota a 100).
-    Offset:
-      name: offset
-      in: query
-      schema: { type: integer, minimum: 0, default: 0 }
-  responses:
-    InvalidQuery:
-      description: Parámetros de consulta inválidos (`INVALID_QUERY`)
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorResponse" }
-    Unauthorized:
-      description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorResponse" }
-    Forbidden:
-      description: El usuario no es staff de la plataforma (`FORBIDDEN`)
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorResponse" }
-    RecoveryRequestNotFound:
-      description: La solicitud no existe (`RECOVERY_REQUEST_NOT_FOUND`)
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorResponse" }
-    RecoveryRequestAlreadyResolved:
-      description: La solicitud ya fue aprobada o rechazada (`RECOVERY_REQUEST_ALREADY_RESOLVED`)
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    BearerAuth:
+      description: Escribir "Bearer " seguido del JWT. El usuario del token tiene que
+        ser staff de la plataforma.
+      in: header
+      name: Authorization
+      type: apiKey
   schemas:
-    ErrorResponse:
+    apierr.Body:
+      properties:
+        code:
+          example: FORBIDDEN
+          type: string
+        details:
+          additionalProperties: {}
+          type: object
+        message:
+          type: string
+      required:
+        - code
+        - details
+        - message
       type: object
-      required: [error]
+    apierr.ErrorResponse:
       properties:
         error:
-          type: object
-          required: [code, message, details]
-          properties:
-            code: { type: string, example: FORBIDDEN }
-            message: { type: string }
-            details: { type: object, additionalProperties: true }
-    UserStatus:
-      type: string
-      enum: [active, pending, suspended]
-      description: |
-        `suspended` si el staff suspendió la cuenta; si no, `pending` mientras
-        el usuario no confirmó su email y `active` después.
-    User:
+          $ref: "#/components/schemas/apierr.Body"
+      required:
+        - error
       type: object
-      required: [id, name, email, status, created_at, suspended_at]
-      properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        email: { type: string, format: email }
-        status: { $ref: "#/components/schemas/UserStatus" }
-        created_at:
-          type: string
-          format: date-time
-          description: Fecha de registro (UTC).
-        suspended_at:
-          type: string
-          format: date-time
-          nullable: true
-          description: Cuándo se suspendió; null si no está suspendido.
-    UserList:
-      type: object
-      required: [users, total, limit, offset]
-      properties:
-        users:
-          type: array
-          items: { $ref: "#/components/schemas/User" }
-        total: { type: integer, description: Cantidad de usuarios que cumplen los filtros. }
-        limit: { type: integer }
-        offset: { type: integer }
-    Server:
-      type: object
-      required: [id, name, owner_id, owner_name, member_count, created_at, suspended_at]
-      properties:
-        id: { type: string, format: uuid }
-        name: { type: string }
-        owner_id: { type: string, format: uuid }
-        owner_name:
-          type: string
-          nullable: true
-          description: null si el perfil del dueño todavía no se replicó.
-        member_count: { type: integer }
-        created_at: { type: string, format: date-time }
-        suspended_at:
-          type: string
-          format: date-time
-          nullable: true
-          description: Desde cuándo está suspendido (UTC). null si el servidor está activo.
-    ServerList:
-      type: object
-      required: [servers, total, limit, offset]
-      properties:
-        servers:
-          type: array
-          items: { $ref: "#/components/schemas/Server" }
-        total: { type: integer, description: Cantidad de servidores que cumplen el filtro. }
-        limit: { type: integer }
-        offset: { type: integer }
-    DeleteServerRequest:
-      type: object
-      required: [confirm_name]
+    handler.deleteServerRequest:
       properties:
         confirm_name:
-          type: string
-          description: Nombre del servidor, tal como lo ve el staff. Sin espacios en los bordes; distingue mayúsculas.
+          description: >-
+            ConfirmName es el nombre del servidor, tal como lo ve el staff. Sin
+            espacios
+
+            en los bordes; distingue mayúsculas.
           example: Sala de prueba
-    DossierMembership:
+          type: string
+      required:
+        - confirm_name
       type: object
-      required: [server_id, server_name, joined_at]
+    handler.sectionPage:
       properties:
-        server_id: { type: string, format: uuid }
+        items:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+      required:
+        - items
+        - limit
+        - offset
+        - total
+      type: object
+    handler.statusResponse:
+      properties:
+        status:
+          example: alive
+          type: string
+      required:
+        - status
+      type: object
+    handler.unavailableResponse:
+      properties:
+        failed:
+          example:
+            - postgres
+          items:
+            type: string
+          type: array
+        status:
+          example: unavailable
+          type: string
+      required:
+        - failed
+        - status
+      type: object
+    model.DossierActivity:
+      properties:
+        description:
+          example: "Envió un mensaje en #general de GamersHub"
+          type: string
+        id:
+          format: uuid
+          type: string
+        kind:
+          enum:
+            - message_sent
+            - joined_server
+            - left_server
+          type: string
+        occurred_at:
+          format: date-time
+          type: string
+        server_id:
+          format: uuid
+          type: string
+      required:
+        - description
+        - id
+        - kind
+        - occurred_at
+        - server_id
+      type: object
+    model.DossierMembership:
+      properties:
+        joined_at:
+          format: date-time
+          type: string
+        server_icon_url:
+          description: >-
+            ServerIconURL es la dirección del ícono tal como la guarda servers,
+            o
+
+            null si no tiene o todavía no llegó a la réplica.
+          type: string
+          nullable: true
+        server_id:
+          format: uuid
+          type: string
+        server_name:
+          description: ServerName es null si la foto del servidor todavía no llegó a la
+            réplica.
+          type: string
+          nullable: true
+      required:
+        - joined_at
+        - server_icon_url
+        - server_id
+        - server_name
+      type: object
+    model.DossierModerationAction:
+      properties:
+        applied_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        kind:
+          enum:
+            - suspension
+            - reactivation
+            - deletion_requested
+            - ban
+            - unban
+            - kick
+            - mute
+            - unmute
+          type: string
+        scope:
+          enum:
+            - platform
+            - server
+          type: string
+        server_id:
+          format: uuid
+          type: string
+          nullable: true
         server_name:
           type: string
           nullable: true
-          description: null si la foto del servidor todavía no se replicó.
-        joined_at: { type: string, format: date-time, description: Cuándo entró (UTC). }
-    DossierActivity:
-      type: object
-      required: [id, kind, description, server_id, occurred_at]
-      properties:
-        id: { type: string, format: uuid }
-        kind: { type: string, enum: [message_sent, joined_server, left_server] }
-        description:
-          type: string
-          description: Texto listo para mostrar. Nunca incluye el contenido de un mensaje.
-          example: Envió un mensaje en #general de GamersHub
-        server_id: { type: string, format: uuid }
-        occurred_at: { type: string, format: date-time }
-    DossierReport:
-      type: object
-      required: [id, reason, created_at, kind, status, resolved_at, server_id, server_name, reported_user_id, reported_user_name]
-      description: |
-        No incluye quién hizo el reporte ni quién lo resolvió.
-      properties:
-        id: { type: string, format: uuid }
-        reason: { type: string }
-        created_at: { type: string, format: date-time }
-        kind: { type: string, enum: [user, message] }
-        status: { type: string, enum: [pending, resolved, dismissed] }
-        resolved_at: { type: string, format: date-time, nullable: true }
-        server_id: { type: string, format: uuid }
-        server_name: { type: string, nullable: true }
-        reported_user_id:
-          type: string
-          format: uuid
-          nullable: true
-          description: |
-            En un reporte de usuario, el reportado. En uno de mensaje, el autor
-            del mensaje; es null si admin no lo conoce (el mensaje es anterior
-            al despliegue, pasó la retención, o su evento todavía no llegó).
-        reported_user_name: { type: string, nullable: true }
-    DossierModerationAction:
-      type: object
-      required: [id, kind, applied_at, scope, server_id, server_name, target_user_id, target_user_name]
-      description: |
-        No incluye quién aplicó la acción.
-      properties:
-        id: { type: string, format: uuid }
-        kind:
-          type: string
-          enum: [suspension, reactivation, deletion_requested, ban, unban, kick, mute, unmute]
-          description: |
-            `suspension`, `reactivation` y `deletion_requested` son del staff
-            (`scope: platform`); el resto, de los moderadores de un servidor
-            (`scope: server`).
-        applied_at: { type: string, format: date-time }
-        scope: { type: string, enum: [platform, server] }
-        server_id:
-          type: string
-          format: uuid
-          nullable: true
-          description: El servidor donde ocurrió; null en una acción del staff sobre un usuario.
-        server_name: { type: string, nullable: true }
         target_user_id:
-          type: string
           format: uuid
-          nullable: true
-          description: Sobre quién; null en una acción del staff sobre un servidor.
-        target_user_name: { type: string, nullable: true }
-    MessagingDay:
-      type: object
-      required: [date, messages]
-      properties:
-        date: { type: string, format: date, example: "2026-11-08", description: Día UTC. }
-        messages: { type: integer, minimum: 0 }
-    UserDossierSummary:
-      type: object
-      required: [user, last_activity_at, counts, latest]
-      properties:
-        user: { $ref: "#/components/schemas/User" }
-        last_activity_at:
           type: string
+          nullable: true
+        target_user_name:
+          type: string
+          nullable: true
+      required:
+        - applied_at
+        - id
+        - kind
+        - scope
+        - server_id
+        - server_name
+        - target_user_id
+        - target_user_name
+      type: object
+    model.DossierRecoveryRequest:
+      properties:
+        id:
+          format: uuid
+          type: string
+        requested_at:
           format: date-time
+          type: string
+        resolved_at:
+          format: date-time
+          type: string
           nullable: true
-          description: null si no hay actividad registrada.
-        counts:
-          type: object
-          required: [servers, activity, reports, moderation, recovery_requests]
-          properties:
-            servers: { type: integer }
-            activity: { type: integer }
-            reports: { type: integer }
-            moderation: { type: integer }
-            recovery_requests: { type: integer }
-        latest:
-          type: object
-          required: [servers, activity, reports, moderation, recovery_requests]
-          description: Hasta 5 ítems de cada sección, del más nuevo al más viejo.
-          properties:
-            servers:
-              type: array
-              items: { $ref: "#/components/schemas/DossierMembership" }
-            activity:
-              type: array
-              items: { $ref: "#/components/schemas/DossierActivity" }
-            reports:
-              type: array
-              items: { $ref: "#/components/schemas/DossierReport" }
-            moderation:
-              type: array
-              items: { $ref: "#/components/schemas/DossierModerationAction" }
-            recovery_requests:
-              type: array
-              items: { $ref: "#/components/schemas/DossierRecoveryRequest" }
-    ServerDossierSummary:
-      type: object
-      required: [server, messaging, counts, latest]
-      properties:
-        server: { $ref: "#/components/schemas/Server" }
-        messaging:
-          type: array
-          minItems: 7
-          maxItems: 7
-          description: Últimos 7 días UTC, del más viejo al más nuevo, con ceros.
-          items: { $ref: "#/components/schemas/MessagingDay" }
-        counts:
-          type: object
-          required: [reports, moderation]
-          properties:
-            reports: { type: integer }
-            moderation: { type: integer }
-        latest:
-          type: object
-          required: [reports, moderation]
-          description: Hasta 5 ítems de cada sección, del más nuevo al más viejo.
-          properties:
-            reports:
-              type: array
-              items: { $ref: "#/components/schemas/DossierReport" }
-            moderation:
-              type: array
-              items: { $ref: "#/components/schemas/DossierModerationAction" }
-    DossierMembershipPage:
-      type: object
-      required: [items, total, limit, offset]
-      properties:
-        items:
-          type: array
-          items: { $ref: "#/components/schemas/DossierMembership" }
-        total: { type: integer }
-        limit: { type: integer }
-        offset: { type: integer }
-    DossierActivityPage:
-      type: object
-      required: [items, total, limit, offset]
-      properties:
-        items:
-          type: array
-          items: { $ref: "#/components/schemas/DossierActivity" }
-        total: { type: integer }
-        limit: { type: integer }
-        offset: { type: integer }
-    DossierReportPage:
-      type: object
-      required: [items, total, limit, offset]
-      properties:
-        items:
-          type: array
-          items: { $ref: "#/components/schemas/DossierReport" }
-        total: { type: integer }
-        limit: { type: integer }
-        offset: { type: integer }
-    DossierModerationPage:
-      type: object
-      required: [items, total, limit, offset]
-      properties:
-        items:
-          type: array
-          items: { $ref: "#/components/schemas/DossierModerationAction" }
-        total: { type: integer }
-        limit: { type: integer }
-        offset: { type: integer }
-    DossierRecoveryRequestPage:
-      type: object
-      required: [items, total, limit, offset]
-      properties:
-        items:
-          type: array
-          items: { $ref: "#/components/schemas/DossierRecoveryRequest" }
-        total: { type: integer }
-        limit: { type: integer }
-        offset: { type: integer }
-    RecoveryRequestStatus:
-      type: string
-      enum: [pending, approved, rejected]
-    StaffRef:
-      type: object
-      required: [id, name]
-      properties:
-        id: { type: string, format: uuid }
-        name: { type: string, nullable: true, description: null si el usuario del staff no está en la réplica. }
-    DossierRecoveryRequest:
-      type: object
-      required: [id, status, requested_at, resolved_at, resolved_by]
-      description: Solicitud de recuperación de cuenta del usuario. No es una acción de moderación.
-      properties:
-        id: { type: string, format: uuid }
-        status: { $ref: "#/components/schemas/RecoveryRequestStatus" }
-        requested_at: { type: string, format: date-time }
-        resolved_at: { type: string, format: date-time, nullable: true }
         resolved_by:
-          allOf: [{ $ref: "#/components/schemas/StaffRef" }]
+          allOf:
+            - $ref: "#/components/schemas/model.StaffRef"
           nullable: true
-    RecoveryRequest:
+        status:
+          $ref: "#/components/schemas/model.RecoveryRequestStatus"
+      required:
+        - id
+        - requested_at
+        - resolved_at
+        - resolved_by
+        - status
       type: object
-      required: [id, user, user_id, message, status, requested_at, resolved_at, resolved_by]
+    model.DossierReport:
       properties:
-        id: { type: string, format: uuid }
+        created_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        kind:
+          enum:
+            - user
+            - message
+          type: string
+        reason:
+          type: string
+        reported_user_id:
+          format: uuid
+          type: string
+          nullable: true
+        reported_user_name:
+          type: string
+          nullable: true
+        resolved_at:
+          format: date-time
+          type: string
+          nullable: true
+        server_id:
+          format: uuid
+          type: string
+        server_name:
+          type: string
+          nullable: true
+        status:
+          enum:
+            - pending
+            - resolved
+            - dismissed
+          type: string
+      required:
+        - created_at
+        - id
+        - kind
+        - reason
+        - reported_user_id
+        - reported_user_name
+        - resolved_at
+        - server_id
+        - server_name
+        - status
+      type: object
+    model.MessagingDay:
+      properties:
+        date:
+          description: YYYY-MM-DD, día UTC
+          example: 2026-11-08
+          format: date
+          type: string
+        messages:
+          minimum: 0
+          type: integer
+      required:
+        - date
+        - messages
+      type: object
+    model.PreviousRecoveryRequests:
+      properties:
+        rejected:
+          type: integer
+        total:
+          type: integer
+      required:
+        - rejected
+        - total
+      type: object
+    model.RecoveryRequest:
+      properties:
+        id:
+          format: uuid
+          type: string
+        message:
+          description: Message es lo que contó el usuario, o vacío si no escribió nada.
+          maxLength: 500
+          type: string
+        requested_at:
+          format: date-time
+          type: string
+        resolved_at:
+          description: ResolvedAt y ResolvedBy son null mientras esté pendiente.
+          format: date-time
+          type: string
+          nullable: true
+        resolved_by:
+          allOf:
+            - $ref: "#/components/schemas/model.StaffRef"
+          nullable: true
+        status:
+          $ref: "#/components/schemas/model.RecoveryRequestStatus"
         user:
-          allOf: [{ $ref: "#/components/schemas/User" }]
+          allOf:
+            - $ref: "#/components/schemas/model.User"
+          description: User es null si el alta del usuario todavía no llegó a la réplica.
           nullable: true
-          description: null si el alta del usuario todavía no llegó a la réplica.
-        user_id: { type: string, format: uuid }
-        message: { type: string, maxLength: 500, description: Lo que contó el usuario; vacío si no escribió nada. }
-        status: { $ref: "#/components/schemas/RecoveryRequestStatus" }
-        requested_at: { type: string, format: date-time }
-        resolved_at: { type: string, format: date-time, nullable: true }
-        resolved_by:
-          allOf: [{ $ref: "#/components/schemas/StaffRef" }]
-          nullable: true
-          description: Quién la aprobó o rechazó; null mientras esté pendiente.
-    RecoveryRequestList:
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - id
+        - message
+        - requested_at
+        - resolved_at
+        - resolved_by
+        - status
+        - user
+        - user_id
       type: object
-      required: [requests, total, limit, offset]
+    model.RecoveryRequestDetail:
       properties:
+        id:
+          format: uuid
+          type: string
+        message:
+          description: Message es lo que contó el usuario, o vacío si no escribió nada.
+          maxLength: 500
+          type: string
+        previous_requests:
+          $ref: "#/components/schemas/model.PreviousRecoveryRequests"
+        requested_at:
+          format: date-time
+          type: string
+        resolved_at:
+          description: ResolvedAt y ResolvedBy son null mientras esté pendiente.
+          format: date-time
+          type: string
+          nullable: true
+        resolved_by:
+          allOf:
+            - $ref: "#/components/schemas/model.StaffRef"
+          nullable: true
+        status:
+          $ref: "#/components/schemas/model.RecoveryRequestStatus"
+        user:
+          allOf:
+            - $ref: "#/components/schemas/model.User"
+          description: User es null si el alta del usuario todavía no llegó a la réplica.
+          nullable: true
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - id
+        - message
+        - previous_requests
+        - requested_at
+        - resolved_at
+        - resolved_by
+        - status
+        - user
+        - user_id
+      type: object
+    model.RecoveryRequestList:
+      properties:
+        limit:
+          type: integer
+        offset:
+          type: integer
         requests:
+          items:
+            $ref: "#/components/schemas/model.RecoveryRequest"
           type: array
-          items: { $ref: "#/components/schemas/RecoveryRequest" }
-        total: { type: integer, description: Cantidad de solicitudes que cumplen los filtros. }
-        limit: { type: integer }
-        offset: { type: integer }
-    RecoveryRequestDetail:
-      allOf:
-        - { $ref: "#/components/schemas/RecoveryRequest" }
-        - type: object
-          required: [previous_requests]
-          properties:
-            previous_requests:
-              type: object
-              required: [total, rejected]
-              description: Solicitudes anteriores del mismo usuario.
-              properties:
-                total: { type: integer }
-                rejected: { type: integer }
+        total:
+          type: integer
+      required:
+        - limit
+        - offset
+        - requests
+        - total
+      type: object
+    model.RecoveryRequestStatus:
+      enum:
+        - pending
+        - approved
+        - rejected
+      type: string
+      x-enum-varnames:
+        - RecoveryRequestPending
+        - RecoveryRequestApproved
+        - RecoveryRequestRejected
+    model.Server:
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        icon_url:
+          description: >-
+            IconURL es la dirección del ícono tal como la guarda servers (URL
+            pública
+
+            o ruta del gateway), o null si no tiene o todavía no llegó a la réplica.
+          type: string
+          nullable: true
+        id:
+          format: uuid
+          type: string
+        member_count:
+          type: integer
+        name:
+          type: string
+        owner_id:
+          format: uuid
+          type: string
+        owner_name:
+          description: OwnerName es null si el perfil del dueño todavía no llegó a la
+            réplica.
+          type: string
+          nullable: true
+        suspended_at:
+          description: SuspendedAt es null si el servidor no está suspendido.
+          format: date-time
+          type: string
+          nullable: true
+      required:
+        - created_at
+        - icon_url
+        - id
+        - member_count
+        - name
+        - owner_id
+        - owner_name
+        - suspended_at
+      type: object
+    model.ServerDossierCounts:
+      properties:
+        moderation:
+          type: integer
+        reports:
+          type: integer
+      required:
+        - moderation
+        - reports
+      type: object
+    model.ServerDossierLatest:
+      properties:
+        moderation:
+          items:
+            $ref: "#/components/schemas/model.DossierModerationAction"
+          type: array
+        reports:
+          items:
+            $ref: "#/components/schemas/model.DossierReport"
+          type: array
+      required:
+        - moderation
+        - reports
+      type: object
+    model.ServerDossierSummary:
+      properties:
+        counts:
+          $ref: "#/components/schemas/model.ServerDossierCounts"
+        latest:
+          $ref: "#/components/schemas/model.ServerDossierLatest"
+        messaging:
+          description: Messaging son los últimos 7 días UTC, del más viejo al más nuevo,
+            con ceros.
+          items:
+            $ref: "#/components/schemas/model.MessagingDay"
+          type: array
+        server:
+          $ref: "#/components/schemas/model.Server"
+      required:
+        - counts
+        - latest
+        - messaging
+        - server
+      type: object
+    model.ServerList:
+      properties:
+        limit:
+          type: integer
+        offset:
+          type: integer
+        servers:
+          items:
+            $ref: "#/components/schemas/model.Server"
+          type: array
+        total:
+          type: integer
+      required:
+        - limit
+        - offset
+        - servers
+        - total
+      type: object
+    model.StaffRef:
+      properties:
+        id:
+          format: uuid
+          type: string
+        name:
+          description: Name es null si el usuario del staff no está en la réplica.
+          type: string
+          nullable: true
+      required:
+        - id
+        - name
+      type: object
+    model.User:
+      properties:
+        avatar_url:
+          description: >-
+            AvatarURL es la dirección de la foto de perfil tal como la guarda
+
+            identify (URL pública o ruta del gateway), o null si no tiene o todavía
+
+            no llegó a la réplica.
+          type: string
+          nullable: true
+        created_at:
+          description: CreatedAt es la fecha de registro de la cuenta (UTC).
+          format: date-time
+          type: string
+        email:
+          format: email
+          type: string
+        id:
+          format: uuid
+          type: string
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/model.UserStatus"
+        suspended_at:
+          description: SuspendedAt es null si el usuario no está suspendido.
+          format: date-time
+          type: string
+          nullable: true
+      required:
+        - avatar_url
+        - created_at
+        - email
+        - id
+        - name
+        - status
+        - suspended_at
+      type: object
+    model.UserDossierCounts:
+      properties:
+        activity:
+          type: integer
+        moderation:
+          type: integer
+        recovery_requests:
+          type: integer
+        reports:
+          type: integer
+        servers:
+          type: integer
+      required:
+        - activity
+        - moderation
+        - recovery_requests
+        - reports
+        - servers
+      type: object
+    model.UserDossierLatest:
+      properties:
+        activity:
+          items:
+            $ref: "#/components/schemas/model.DossierActivity"
+          type: array
+        moderation:
+          items:
+            $ref: "#/components/schemas/model.DossierModerationAction"
+          type: array
+        recovery_requests:
+          items:
+            $ref: "#/components/schemas/model.DossierRecoveryRequest"
+          type: array
+        reports:
+          items:
+            $ref: "#/components/schemas/model.DossierReport"
+          type: array
+        servers:
+          items:
+            $ref: "#/components/schemas/model.DossierMembership"
+          type: array
+      required:
+        - activity
+        - moderation
+        - recovery_requests
+        - reports
+        - servers
+      type: object
+    model.UserDossierSummary:
+      properties:
+        counts:
+          $ref: "#/components/schemas/model.UserDossierCounts"
+        last_activity_at:
+          description: LastActivityAt es null si no hay actividad registrada.
+          format: date-time
+          type: string
+          nullable: true
+        latest:
+          $ref: "#/components/schemas/model.UserDossierLatest"
+        user:
+          $ref: "#/components/schemas/model.User"
+      required:
+        - counts
+        - last_activity_at
+        - latest
+        - user
+      type: object
+    model.UserList:
+      properties:
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+        users:
+          items:
+            $ref: "#/components/schemas/model.User"
+          type: array
+      required:
+        - limit
+        - offset
+        - total
+        - users
+      type: object
+    model.UserStatus:
+      enum:
+        - active
+        - pending
+        - suspended
+      type: string
+      x-enum-varnames:
+        - UserStatusActive
+        - UserStatusPending
+        - UserStatusSuspended

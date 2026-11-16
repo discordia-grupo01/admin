@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"net/http"
+
 	"github.com/discordia-grupo01/admin/internal/apierr"
 	"github.com/discordia-grupo01/admin/internal/changes"
 	"github.com/discordia-grupo01/admin/internal/logging"
@@ -33,10 +35,28 @@ func NewRouter(deps Deps, registrars ...RouteRegistrar) *gin.Engine {
 	if deps.Changes != nil {
 		admin.Use(middleware.NotifyChanges(deps.Changes))
 	}
+	admin.GET("/me", staffSession)
 	for _, register := range registrars {
 		register(admin)
 	}
 
+	r.HandleMethodNotAllowed = true
+	r.NoMethod(apierr.MethodNotAllowed)
 	r.NoRoute(apierr.NotFound)
 	return r
+}
+
+// staffSession atiende GET /v1/admin/me: 204 si quien llama es staff. Los
+// middlewares del grupo ya responden 401 o 403 en cualquier otro caso.
+//
+// @Summary      Verificar que quien llama es staff
+// @Description  El backoffice lo llama al iniciar sesión, después de validar las credenciales con identify, para no dejar entrar a quien no es staff.
+// @Tags         Session
+// @Security     BearerAuth
+// @Success      204  "Quien llama es staff de la plataforma"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
+// @Router       /v1/admin/me [get]
+func staffSession(c *gin.Context) {
+	c.Status(http.StatusNoContent)
 }

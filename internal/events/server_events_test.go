@@ -69,7 +69,7 @@ func TestServerUpdatedIsApplied(t *testing.T) {
 }
 
 func snapshotEqual(a, b repository.ServerSnapshot) bool {
-	return a.ServerID == b.ServerID && a.Name == b.Name && a.OwnerID == b.OwnerID &&
+	return a.ServerID == b.ServerID && a.Name == b.Name && a.OwnerID == b.OwnerID && a.IconURL == b.IconURL &&
 		a.CreatedAt.Equal(b.CreatedAt) && a.OccurredAt.Equal(b.OccurredAt)
 }
 
@@ -158,5 +158,16 @@ func TestServerStoreErrorIsTransientNotDiscarded(t *testing.T) {
 		if !Process(context.Background(), NewServerEventsHandler(&fakeServerSync{err: boom}), &recorderSpy{}, key, []byte(body)) {
 			t.Errorf("%s: Process debe pedir reencolar ante un error de base", key)
 		}
+	}
+}
+
+func TestServerUpdatedKeepsTheIcon(t *testing.T) {
+	sync := &fakeServerSync{}
+	body := `{"event_id":"e1","occurred_at":"2026-09-26T14:30:00Z","server_id":"` + serverID + `","name":"Gamers","owner_id":"` + otherID + `","created_at":"2026-09-26T14:00:00Z","icon_url":"/v1/servers/` + serverID + `/icon?v=abc123"}`
+	if err := NewServerEventsHandler(sync).Handle(context.Background(), servers.RoutingKeyServerUpdated, []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if len(sync.snapshots) != 1 || sync.snapshots[0].IconURL != "/v1/servers/"+serverID+"/icon?v=abc123" {
+		t.Fatalf("foto aplicada: %+v", sync.snapshots)
 	}
 }
