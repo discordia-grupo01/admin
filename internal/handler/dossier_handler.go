@@ -57,9 +57,10 @@ func (h *DossierHandler) Register(admin *gin.RouterGroup) {
 // @Security     BearerAuth
 // @Param        id  path  string  true  "ID del usuario" format(uuid)
 // @Success      200  {object}  model.UserDossierSummary  "Resumen del expediente"
-// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció (`SESSION_EXPIRED`)"
 // @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
 // @Failure      404  {object}  apierr.ErrorResponse  "El usuario no existe, o todavía no llegó su registro (`USER_NOT_FOUND`)"
+// @Failure      500  {object}  apierr.ErrorResponse  "Error interno (`INTERNAL_ERROR`)"
 // @Router       /v1/admin/users/{id}/dossier [get]
 func (h *DossierHandler) UserSummary(c *gin.Context) {
 	summary, err := h.dossier.UserSummary(c.Request.Context(), c.Param("id"))
@@ -83,9 +84,10 @@ func (h *DossierHandler) UserSummary(c *gin.Context) {
 // @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) maximum(9007199254740991) default(0)
 // @Success      200  {object}  sectionPage  "Una página de la sección (puede ser vacía)"
 // @Failure      400  {object}  apierr.ErrorResponse  "La sección no existe (`INVALID_SECTION`) o `limit` / `offset` son inválidos (`INVALID_QUERY`)"
-// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció (`SESSION_EXPIRED`)"
 // @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
 // @Failure      404  {object}  apierr.ErrorResponse  "El usuario no existe (`USER_NOT_FOUND`)"
+// @Failure      500  {object}  apierr.ErrorResponse  "Error interno (`INTERNAL_ERROR`)"
 // @Router       /v1/admin/users/{id}/dossier/{section} [get]
 func (h *DossierHandler) UserSection(c *gin.Context) {
 	limit, offset, ok := pageParams(c)
@@ -113,9 +115,10 @@ func (h *DossierHandler) UserSection(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        id  path  string  true  "ID del servidor" format(uuid)
 // @Success      200  {object}  model.ServerDossierSummary  "Resumen del expediente"
-// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció (`SESSION_EXPIRED`)"
 // @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
 // @Failure      404  {object}  apierr.ErrorResponse  "El servidor no existe, todavía no llegó su alta o fue eliminado (`SERVER_NOT_FOUND`)"
+// @Failure      500  {object}  apierr.ErrorResponse  "Error interno (`INTERNAL_ERROR`)"
 // @Router       /v1/admin/servers/{id}/dossier [get]
 func (h *DossierHandler) ServerSummary(c *gin.Context) {
 	summary, err := h.dossier.ServerSummary(c.Request.Context(), c.Param("id"))
@@ -139,9 +142,10 @@ func (h *DossierHandler) ServerSummary(c *gin.Context) {
 // @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) maximum(9007199254740991) default(0)
 // @Success      200  {object}  sectionPage  "Una página de la sección (puede ser vacía)"
 // @Failure      400  {object}  apierr.ErrorResponse  "La sección no existe (`INVALID_SECTION`) o `limit` / `offset` son inválidos (`INVALID_QUERY`)"
-// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció (`SESSION_EXPIRED`)"
 // @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
 // @Failure      404  {object}  apierr.ErrorResponse  "El servidor no existe o fue eliminado (`SERVER_NOT_FOUND`)"
+// @Failure      500  {object}  apierr.ErrorResponse  "Error interno (`INTERNAL_ERROR`)"
 // @Router       /v1/admin/servers/{id}/dossier/{section} [get]
 func (h *DossierHandler) ServerSection(c *gin.Context) {
 	limit, offset, ok := pageParams(c)

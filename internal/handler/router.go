@@ -54,8 +54,9 @@ func NewRouter(deps Deps, registrars ...RouteRegistrar) *gin.Engine {
 // @Tags         Session
 // @Security     BearerAuth
 // @Success      204  "Quien llama es staff de la plataforma"
-// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció (`SESSION_EXPIRED`)"
 // @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
+// @Failure      500  {object}  apierr.ErrorResponse  "Error interno (`INTERNAL_ERROR`)"
 // @Router       /v1/admin/me [get]
 func staffSession(c *gin.Context) {
 	c.Status(http.StatusNoContent)
