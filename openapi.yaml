@@ -54,13 +54,20 @@ paths:
         "204":
           description: Quien llama es staff de la plataforma
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             "*/*":
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            "*/*":
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             "*/*":
               schema:
@@ -126,13 +133,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -162,7 +176,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.RecoveryRequestDetail"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -175,6 +190,12 @@ paths:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
           description: La solicitud no existe (`RECOVERY_REQUEST_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -208,7 +229,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.RecoveryRequestDetail"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -228,6 +250,12 @@ paths:
         "409":
           description: La solicitud ya fue aprobada o rechazada
             (`RECOVERY_REQUEST_ALREADY_RESOLVED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -259,7 +287,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.RecoveryRequestDetail"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -279,6 +308,12 @@ paths:
         "409":
           description: La solicitud ya fue aprobada o rechazada
             (`RECOVERY_REQUEST_ALREADY_RESOLVED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -342,13 +377,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -399,7 +441,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -413,6 +456,12 @@ paths:
         "404":
           description: El servidor no existe, todavía no llegó a la réplica o ya fue
             eliminado (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -451,7 +500,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.ServerDossierSummary"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -465,6 +515,12 @@ paths:
         "404":
           description: El servidor no existe, todavía no llegó su alta o fue eliminado
             (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -528,7 +584,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -541,6 +598,12 @@ paths:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
           description: El servidor no existe o fue eliminado (`SERVER_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -574,7 +637,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.Server"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -594,6 +658,12 @@ paths:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: El servidor no estaba suspendido (`SERVER_NOT_SUSPENDED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -631,7 +701,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.Server"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -651,6 +722,12 @@ paths:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: El servidor ya estaba suspendido (`SERVER_ALREADY_SUSPENDED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -712,13 +789,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "403":
           description: El usuario no es staff de la plataforma (`FORBIDDEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -755,7 +839,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.UserDossierSummary"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -769,6 +854,12 @@ paths:
         "404":
           description: El usuario no existe, o todavía no llegó su registro
             (`USER_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -836,7 +927,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -849,6 +941,12 @@ paths:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "404":
           description: El usuario no existe (`USER_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -881,7 +979,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.User"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -900,6 +999,12 @@ paths:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: El usuario no estaba suspendido (`USER_NOT_SUSPENDED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
@@ -932,7 +1037,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/model.User"
         "401":
-          description: Falta el token, es inválido o venció (`SESSION_EXPIRED`)
+          description: Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció
+            (`SESSION_EXPIRED`)
           content:
             application/json:
               schema:
@@ -952,6 +1058,12 @@ paths:
                 $ref: "#/components/schemas/apierr.ErrorResponse"
         "409":
           description: El usuario ya estaba suspendido (`USER_ALREADY_SUSPENDED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/apierr.ErrorResponse"
+        "500":
+          description: Error interno (`INTERNAL_ERROR`)
           content:
             application/json:
               schema:
