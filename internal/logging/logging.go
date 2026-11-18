@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/discordia-grupo01/admin/internal/apierr"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -237,7 +238,7 @@ func Recovery() gin.HandlerFunc {
 			"error", fmt.Sprint(recovered),
 			"stack", string(debug.Stack()),
 		)
-		c.AbortWithStatus(http.StatusInternalServerError)
+		apierr.Internal(c)
 	})
 }
 

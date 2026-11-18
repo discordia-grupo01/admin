@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -119,7 +120,7 @@ func TestAdminGroupRequiresAuthAndStaff(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"sin token", "", http.StatusUnauthorized, apierr.CodeSessionExpired},
+		{"sin token", "", http.StatusUnauthorized, apierr.CodeUnauthorized},
 		{"usuario que no es staff", bearer(t, userID), http.StatusForbidden, apierr.CodeForbidden},
 		{"staff", bearer(t, staffID), http.StatusOK, ""},
 	}
@@ -171,4 +172,56 @@ func TestUnknownRouteUsesErrorFormat(t *testing.T) {
 	if w.Code != http.StatusNotFound || body.Error.Code != apierr.CodeNotFound {
 		t.Fatalf("status = %d body %+v", w.Code, body)
 	}
+	assertEnvelope(t, w.Body.Bytes())
+}
+
+func TestMethodNotAllowedUsesErrorFormat(t *testing.T) {
+	r := newTestRouter(NewHealthHandler())
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/admin/me", nil))
+	if w.Code != http.StatusMethodNotAllowed || assertEnvelope(t, w.Body.Bytes()) != apierr.CodeMethodNotAllowed {
+		t.Fatalf("status = %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMalformedJSONUsesErrorFormat(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/x", func(c *gin.Context) {
+		var b struct{ A string }
+		if err := c.ShouldBindJSON(&b); err != nil {
+			apierr.InvalidBody(c, "El cuerpo de la request no es válido", "", "")
+		}
+	})
+	req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader("{no es json"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest || assertEnvelope(t, w.Body.Bytes()) != apierr.CodeInvalidBody {
+		t.Fatalf("status = %d body %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"details":{}`) {
+		t.Errorf("details debe ser {}: %s", w.Body.String())
+	}
+}
+
+// assertEnvelope verifica la forma completa del sobre de error (RF1) y devuelve el code.
+func assertEnvelope(t *testing.T, body []byte) string {
+	t.Helper()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil || len(raw) != 1 || raw["error"] == nil {
+		t.Fatalf("el body no es el sobre de error: %v (%s)", err, body)
+	}
+	var e struct {
+		Code    string         `json:"code"`
+		Message string         `json:"message"`
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal(raw["error"], &e); err != nil {
+		t.Fatalf("error mal formado: %v (%s)", err, body)
+	}
+	if !regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`).MatchString(e.Code) || e.Message == "" || e.Details == nil {
+		t.Fatalf("sobre inválido: %s", body)
+	}
+	return e.Code
 }

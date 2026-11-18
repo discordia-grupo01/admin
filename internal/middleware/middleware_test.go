@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 	"time"
 
@@ -115,7 +116,6 @@ func TestUnauthorizedCases(t *testing.T) {
 		"sin Bearer":             "Token abc",
 		"token basura":           "Bearer no.es.jwt",
 		"firma de otra clave":    "Bearer " + token(t, jwt.SigningMethodHS256, "otra-clave", validClaims(staffID)),
-		"vencido":                "Bearer " + token(t, jwt.SigningMethodHS256, testSecret, expired),
 		"sin exp":                "Bearer " + token(t, jwt.SigningMethodHS256, testSecret, noExp),
 		"sin sub":                "Bearer " + token(t, jwt.SigningMethodHS256, testSecret, noSub),
 		"sub que no es UUID":     "Bearer " + token(t, jwt.SigningMethodHS256, testSecret, validClaims("hola")),
@@ -124,11 +124,20 @@ func TestUnauthorizedCases(t *testing.T) {
 	for name, header := range cases {
 		t.Run(name, func(t *testing.T) {
 			w := do(r, header)
-			if w.Code != http.StatusUnauthorized || errorCode(t, w) != apierr.CodeSessionExpired {
+			if w.Code != http.StatusUnauthorized || errorCode(t, w) != apierr.CodeUnauthorized {
 				t.Fatalf("status = %d, body %s", w.Code, w.Body.String())
 			}
+			assertEnvelope(t, w.Body.Bytes())
 		})
 	}
+
+	t.Run("vencido", func(t *testing.T) {
+		w := do(r, "Bearer "+token(t, jwt.SigningMethodHS256, testSecret, expired))
+		if w.Code != http.StatusUnauthorized || errorCode(t, w) != apierr.CodeSessionExpired {
+			t.Fatalf("status = %d, body %s", w.Code, w.Body.String())
+		}
+		assertEnvelope(t, w.Body.Bytes())
+	})
 }
 
 func TestRequireStaffWithoutAuthIsUnauthorized(t *testing.T) {
@@ -137,7 +146,28 @@ func TestRequireStaffWithoutAuthIsUnauthorized(t *testing.T) {
 	r.GET("/x", RequireStaff(fakeStaff{}), func(c *gin.Context) { c.Status(http.StatusOK) })
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/x", nil))
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d", w.Code)
+	if w.Code != http.StatusUnauthorized || assertEnvelope(t, w.Body.Bytes()) != apierr.CodeUnauthorized {
+		t.Fatalf("status = %d body %s", w.Code, w.Body.String())
 	}
+}
+
+// assertEnvelope verifica la forma completa del sobre de error (RF1) y devuelve el code.
+func assertEnvelope(t *testing.T, body []byte) string {
+	t.Helper()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil || len(raw) != 1 || raw["error"] == nil {
+		t.Fatalf("el body no es el sobre de error: %v (%s)", err, body)
+	}
+	var e struct {
+		Code    string         `json:"code"`
+		Message string         `json:"message"`
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal(raw["error"], &e); err != nil {
+		t.Fatalf("error mal formado: %v (%s)", err, body)
+	}
+	if !regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`).MatchString(e.Code) || e.Message == "" || e.Details == nil {
+		t.Fatalf("sobre inválido: %s", body)
+	}
+	return e.Code
 }

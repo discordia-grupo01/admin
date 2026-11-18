@@ -44,10 +44,11 @@ func (h *SuspensionHandler) Register(admin *gin.RouterGroup) {
 // @Security     BearerAuth
 // @Param        id  path  string  true  "ID del usuario" format(uuid)
 // @Success      200  {object}  model.User  "Usuario suspendido"
-// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció (`SESSION_EXPIRED`)"
 // @Failure      403  {object}  apierr.ErrorResponse  "No es staff (`FORBIDDEN`) o el objetivo es staff (`CANNOT_SUSPEND_STAFF`)"
 // @Failure      404  {object}  apierr.ErrorResponse  "El usuario no existe (`USER_NOT_FOUND`)"
 // @Failure      409  {object}  apierr.ErrorResponse  "El usuario ya estaba suspendido (`USER_ALREADY_SUSPENDED`)"
+// @Failure      500  {object}  apierr.ErrorResponse  "Error interno (`INTERNAL_ERROR`)"
 // @Router       /v1/admin/users/{id}/suspension [post]
 func (h *SuspensionHandler) Suspend(c *gin.Context) {
 	u, err := h.suspender.Suspend(c.Request.Context(), c.Param("id"), middleware.UserID(c))
@@ -77,10 +78,11 @@ func (h *SuspensionHandler) Suspend(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        id  path  string  true  "ID del usuario" format(uuid)
 // @Success      200  {object}  model.User  "Usuario reactivado"
-// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció (`SESSION_EXPIRED`)"
 // @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
 // @Failure      404  {object}  apierr.ErrorResponse  "El usuario no existe (`USER_NOT_FOUND`)"
 // @Failure      409  {object}  apierr.ErrorResponse  "El usuario no estaba suspendido (`USER_NOT_SUSPENDED`)"
+// @Failure      500  {object}  apierr.ErrorResponse  "Error interno (`INTERNAL_ERROR`)"
 // @Router       /v1/admin/users/{id}/suspension [delete]
 func (h *SuspensionHandler) Reactivate(c *gin.Context) {
 	u, err := h.suspender.Reactivate(c.Request.Context(), c.Param("id"))

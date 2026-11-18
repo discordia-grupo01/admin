@@ -71,8 +71,9 @@ func (h *UserHandler) Register(admin *gin.RouterGroup) {
 // @Param        offset  query  int  false  "Cantidad de ítems a saltear" minimum(0) maximum(9007199254740991) default(0)
 // @Success      200  {object}  model.UserList  "Usuarios que cumplen los filtros (puede ser una lista vacía)"
 // @Failure      400  {object}  apierr.ErrorResponse  "Parámetros de consulta inválidos (`INVALID_QUERY`)"
-// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció (`SESSION_EXPIRED`)"
 // @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
+// @Failure      500  {object}  apierr.ErrorResponse  "Error interno (`INTERNAL_ERROR`)"
 // @Router       /v1/admin/users [get]
 func (h *UserHandler) List(c *gin.Context) {
 	limit, ok := apierr.ParseNonNegativeIntQuery(c, "limit", model.DefaultLimit)

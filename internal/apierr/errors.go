@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	CodeUnauthorized         = "UNAUTHORIZED"
 	CodeSessionExpired       = "SESSION_EXPIRED"
 	CodeForbidden            = "FORBIDDEN"
 	CodeNotFound             = "NOT_FOUND"
@@ -74,8 +75,27 @@ func ParseNonNegativeIntQuery(c *gin.Context, key string, def int) (value int, o
 	return n, true
 }
 
+// InvalidBody responde 400 INVALID_BODY. Si se conoce el campo inválido va en
+// details.field (y details.reason si se informa); con field vacío details es {}.
+func InvalidBody(c *gin.Context, message, field, reason string) {
+	details := map[string]any{}
+	if field != "" {
+		details["field"] = field
+		if reason != "" {
+			details["reason"] = reason
+		}
+	}
+	Abort(c, http.StatusBadRequest, CodeInvalidBody, message, details)
+}
+
+// Unauthorized responde 401 UNAUTHORIZED: falta el token, es inválido o su firma no verifica.
 func Unauthorized(c *gin.Context) {
-	Abort(c, http.StatusUnauthorized, CodeSessionExpired, "La sesión expiró o ya no es válida", nil)
+	Abort(c, http.StatusUnauthorized, CodeUnauthorized, "Falta el token de acceso o no es válido", nil)
+}
+
+// SessionExpired responde 401 SESSION_EXPIRED: el token es válido pero venció.
+func SessionExpired(c *gin.Context) {
+	Abort(c, http.StatusUnauthorized, CodeSessionExpired, "La sesión expiró", nil)
 }
 
 func Forbidden(c *gin.Context) {
