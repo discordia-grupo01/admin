@@ -65,14 +65,15 @@ type deleteServerRequest struct {
 // @Param        body  body  deleteServerRequest  true  "Confirmación con el nombre del servidor"
 // @Success      202  "Pedido aceptado; la eliminación se completa de forma asíncrona. Sin cuerpo."
 // @Failure      400  {object}  apierr.ErrorResponse  "El cuerpo no es un JSON válido (`INVALID_BODY`) o `confirm_name` falta o no es el nombre del servidor (`DELETE_CONFIRMATION_MISMATCH`, con `details.field = confirm_name`)"
-// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció (`SESSION_EXPIRED`)"
 // @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
 // @Failure      404  {object}  apierr.ErrorResponse  "El servidor no existe, todavía no llegó a la réplica o ya fue eliminado (`SERVER_NOT_FOUND`)"
+// @Failure      500  {object}  apierr.ErrorResponse  "Error interno (`INTERNAL_ERROR`)"
 // @Router       /v1/admin/servers/{id} [delete]
 func (h *ServerModerationHandler) Delete(c *gin.Context) {
 	var body deleteServerRequest
 	if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
-		apierr.Abort(c, http.StatusBadRequest, apierr.CodeInvalidBody, "El cuerpo de la request no es válido", nil)
+		apierr.InvalidBody(c, "El cuerpo de la request no es válido", "", "")
 		return
 	}
 
@@ -106,10 +107,11 @@ func (h *ServerModerationHandler) Delete(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        id  path  string  true  "ID del servidor" format(uuid)
 // @Success      200  {object}  model.Server  "Servidor suspendido"
-// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció (`SESSION_EXPIRED`)"
 // @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
 // @Failure      404  {object}  apierr.ErrorResponse  "El servidor no existe, todavía no llegó a la réplica o ya fue eliminado (`SERVER_NOT_FOUND`)"
 // @Failure      409  {object}  apierr.ErrorResponse  "El servidor ya estaba suspendido (`SERVER_ALREADY_SUSPENDED`)"
+// @Failure      500  {object}  apierr.ErrorResponse  "Error interno (`INTERNAL_ERROR`)"
 // @Router       /v1/admin/servers/{id}/suspension [post]
 func (h *ServerModerationHandler) Suspend(c *gin.Context) {
 	staffID := middleware.UserID(c)
@@ -139,10 +141,11 @@ func (h *ServerModerationHandler) Suspend(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        id  path  string  true  "ID del servidor" format(uuid)
 // @Success      200  {object}  model.Server  "Servidor reactivado"
-// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token, es inválido o venció (`SESSION_EXPIRED`)"
+// @Failure      401  {object}  apierr.ErrorResponse  "Falta el token o no es válido (`UNAUTHORIZED`), o la sesión venció (`SESSION_EXPIRED`)"
 // @Failure      403  {object}  apierr.ErrorResponse  "El usuario no es staff de la plataforma (`FORBIDDEN`)"
 // @Failure      404  {object}  apierr.ErrorResponse  "El servidor no existe, todavía no llegó a la réplica o ya fue eliminado (`SERVER_NOT_FOUND`)"
 // @Failure      409  {object}  apierr.ErrorResponse  "El servidor no estaba suspendido (`SERVER_NOT_SUSPENDED`)"
+// @Failure      500  {object}  apierr.ErrorResponse  "Error interno (`INTERNAL_ERROR`)"
 // @Router       /v1/admin/servers/{id}/suspension [delete]
 func (h *ServerModerationHandler) Reactivate(c *gin.Context) {
 	s, err := h.moderator.Reactivate(c.Request.Context(), c.Param("id"))

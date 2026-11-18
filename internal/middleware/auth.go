@@ -3,6 +3,7 @@
 package middleware
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/discordia-grupo01/admin/internal/apierr"
@@ -38,6 +39,10 @@ func RequireAuth(secret []byte) gin.HandlerFunc {
 		token, err := parser.ParseWithClaims(strings.TrimPrefix(authorization, "Bearer "), claims, func(*jwt.Token) (any, error) {
 			return secret, nil
 		})
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			apierr.SessionExpired(c)
+			return
+		}
 		if err != nil || !token.Valid {
 			apierr.Unauthorized(c)
 			return
