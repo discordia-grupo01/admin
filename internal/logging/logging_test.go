@@ -344,6 +344,22 @@ func TestRecoveryReturns500WithoutLeakingHeaders(t *testing.T) {
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status: %d", recorder.Code)
 	}
+	var body struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("el panic debe responder el sobre de error: %v (%s)", err, recorder.Body.String())
+	}
+	if body.Error.Code != "INTERNAL_ERROR" || body.Error.Message == "" || body.Error.Details == nil {
+		t.Errorf("sobre inválido: %s", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "a@b.com") {
+		t.Errorf("el body filtra el motivo del panic: %s", recorder.Body.String())
+	}
 	line := buf.String()
 	for _, leaked := range []string{"super-secreto", "galleta-secreta", "a@b.com"} {
 		if strings.Contains(line, leaked) {
