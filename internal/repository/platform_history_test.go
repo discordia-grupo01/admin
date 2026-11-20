@@ -113,7 +113,7 @@ func TestServerActionsAreRecordedInTheHistory(t *testing.T) {
 	if _, err := repo.Reactivate(ctx, uid(1), eventFor("admin.server_reactivated")); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.RequestDeletion(ctx, uid(1), "Sala", uid(99), requestedAt, eventFor("admin.server_deletion_requested")); err != nil {
+	if err := repo.RequestDeletion(ctx, uid(1), "Sala", uid(99), requestedAt, eventFor("admin.server_deletion_requested"), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,7 +148,7 @@ func TestAFailedServerActionLeavesNothingInTheHistory(t *testing.T) {
 	if _, err := repo.Reactivate(ctx, uid(1), eventFor("admin.server_reactivated")); !errors.Is(err, repository.ErrServerNotSuspended) {
 		t.Fatalf("err = %v", err)
 	}
-	if err := repo.RequestDeletion(ctx, uid(1), "otro nombre", uid(99), requestedAt, eventFor("k")); !errors.Is(err, repository.ErrDeleteConfirmationMismatch) {
+	if err := repo.RequestDeletion(ctx, uid(1), "otro nombre", uid(99), requestedAt, eventFor("k"), nil); !errors.Is(err, repository.ErrDeleteConfirmationMismatch) {
 		t.Fatalf("err = %v", err)
 	}
 	unserializable := func(int64) (string, any) { return "k", make(chan int) }

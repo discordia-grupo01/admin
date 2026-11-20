@@ -32,6 +32,10 @@ type SuspendedUser struct {
 // suspensión que le toca al usuario. Se llama dentro de la transacción.
 type EventBuilder func(version int64) (routingKey string, payload any)
 
+// OwnerNoticeBuilder arma el aviso al dueño de un servidor con lo que la réplica
+// sabe de él al momento de la acción.
+type OwnerNoticeBuilder func(ownerID, serverName string) (routingKey string, payload any)
+
 type SuspensionRepository interface {
 	// Suspend suspende al usuario y escribe el evento en el outbox, todo en una
 	// misma transacción: o quedan las dos cosas o ninguna. Bloquea la fila del

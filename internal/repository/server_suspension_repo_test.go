@@ -253,7 +253,7 @@ func TestADeletionCanBeRequestedForASuspendedServer(t *testing.T) {
 	seedServer(t, servers, 1, "Sala")
 	suspend(t, repo, 1)
 
-	if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("admin.server_deletion_requested")); err != nil {
+	if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("admin.server_deletion_requested"), nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := outboxRows(t, db), []string{"admin.server_suspended 1", "admin.server_deletion_requested 2"}; !equal(got, want) {

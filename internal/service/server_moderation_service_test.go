@@ -25,15 +25,18 @@ type fakeModerationRepo struct {
 	at          time.Time
 	key         string
 	payload     any
+	noticeKey   string
+	notice      any
 }
 
-func (f *fakeModerationRepo) RequestDeletion(_ context.Context, serverID, confirmName, staffID string, at time.Time, event repository.EventBuilder) error {
+func (f *fakeModerationRepo) RequestDeletion(_ context.Context, serverID, confirmName, staffID string, at time.Time, event repository.EventBuilder, notice repository.OwnerNoticeBuilder) error {
 	f.called = true
 	f.serverID, f.confirmName, f.staffID, f.at = serverID, confirmName, staffID, at
 	if f.err != nil {
 		return f.err
 	}
 	f.key, f.payload = event(4)
+	f.noticeKey, f.notice = notice(testOwnerID, "Sala")
 	return nil
 }
 
@@ -89,6 +92,32 @@ func TestDeleteBuildsASignedEventWithTheVersionFromTheRepository(t *testing.T) {
 	}
 	if e.Verify("otro-secreto") {
 		t.Error("la firma no debe valer con otro secreto")
+	}
+}
+
+const testOwnerID = "7d4c1f0a-5b8e-4f2a-9c3d-2e1b0a9f8c7d"
+
+func TestDeleteBuildsASignedNoticeForTheOwner(t *testing.T) {
+	repo := &fakeModerationRepo{}
+	if err := newModerationService(repo).Delete(context.Background(), testServerID, "Sala", testStaffID); err != nil {
+		t.Fatal(err)
+	}
+
+	if repo.noticeKey != admin.RoutingKeyServerDeletionNotice {
+		t.Errorf("routing key del aviso = %q", repo.noticeKey)
+	}
+	n, ok := repo.notice.(admin.ServerDeletionNotice)
+	if !ok {
+		t.Fatalf("aviso = %T, quería admin.ServerDeletionNotice", repo.notice)
+	}
+	if n.ServerID != testServerID || n.OwnerID != testOwnerID || n.ServerName != "Sala" {
+		t.Errorf("aviso: %+v", n)
+	}
+	if !n.OccurredAt.Equal(repo.at) {
+		t.Errorf("occurred_at del aviso = %v, quería %v", n.OccurredAt, repo.at)
+	}
+	if !n.Verify(testSecret) || n.Verify("otro-secreto") {
+		t.Error("el aviso tiene que salir firmado con el secreto del servicio")
 	}
 }
 

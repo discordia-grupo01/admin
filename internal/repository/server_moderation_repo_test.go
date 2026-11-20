@@ -53,7 +53,7 @@ func TestRequestDeletionRecordsTheRequestAndWritesTheEventInTheSameTransaction(t
 	repo, servers, db := newModerationRepo(t)
 	seedServer(t, servers, 1, "Sala")
 
-	err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("admin.server_deletion_requested"))
+	err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("admin.server_deletion_requested"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +76,65 @@ func TestRequestDeletionRecordsTheRequestAndWritesTheEventInTheSameTransaction(t
 	}
 }
 
+func noticeFor(key string) repository.OwnerNoticeBuilder {
+	return func(ownerID, serverName string) (string, any) {
+		return key, map[string]any{"owner_id": ownerID, "server_name": serverName}
+	}
+}
+
+func noticeRows(t *testing.T, db *sql.DB) []string {
+	t.Helper()
+	rows, err := db.Query(`SELECT routing_key || ' ' || (payload->>'owner_id') || ' ' || (payload->>'server_name')
+		FROM outbox_events WHERE payload ? 'owner_id' ORDER BY seq`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func TestRequestDeletionWritesTheOwnerNoticeWithTheReplicaData(t *testing.T) {
+	repo, servers, db := newModerationRepo(t)
+	seedServer(t, servers, 1, "Sala")
+
+	err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt,
+		eventFor("admin.server_deletion_requested"), noticeFor("admin.server_deletion_notice"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := noticeRows(t, db), []string{"admin.server_deletion_notice " + uid(9) + " Sala"}; !equal(got, want) {
+		t.Errorf("avisos en el outbox = %v, quería %v", got, want)
+	}
+}
+
+func TestRequestDeletionWithAWrongNameWritesNoNotice(t *testing.T) {
+	repo, servers, db := newModerationRepo(t)
+	seedServer(t, servers, 1, "Sala")
+
+	err := repo.RequestDeletion(context.Background(), uid(1), "Otra", uid(99), requestedAt,
+		eventFor("admin.server_deletion_requested"), noticeFor("admin.server_deletion_notice"))
+	if !errors.Is(err, repository.ErrDeleteConfirmationMismatch) {
+		t.Fatalf("err = %v", err)
+	}
+	if got := noticeRows(t, db); len(got) != 0 {
+		t.Errorf("no tenía que quedar aviso: %v", got)
+	}
+}
+
 func TestRequestDeletionIgnoresSpacesAroundTheName(t *testing.T) {
 	repo, servers, db := newModerationRepo(t)
 	seedServer(t, servers, 1, "Sala")
 
-	if err := repo.RequestDeletion(context.Background(), uid(1), "  Sala \t", uid(99), requestedAt, eventFor("k")); err != nil {
+	if err := repo.RequestDeletion(context.Background(), uid(1), "  Sala \t", uid(99), requestedAt, eventFor("k"), nil); err != nil {
 		t.Fatalf("los espacios en los bordes no deberían importar: %v", err)
 	}
 	if got := outboxRows(t, db); len(got) != 1 {
@@ -94,7 +148,7 @@ func TestRequestDeletionWithAWrongNameChangesNothing(t *testing.T) {
 			repo, servers, db := newModerationRepo(t)
 			seedServer(t, servers, 1, "Sala")
 
-			err := repo.RequestDeletion(context.Background(), uid(1), name, uid(99), requestedAt, eventFor("k"))
+			err := repo.RequestDeletion(context.Background(), uid(1), name, uid(99), requestedAt, eventFor("k"), nil)
 			if !errors.Is(err, repository.ErrDeleteConfirmationMismatch) {
 				t.Fatalf("err = %v, quería ErrDeleteConfirmationMismatch", err)
 			}
@@ -125,7 +179,7 @@ func TestRequestDeletionOfAServerThatDoesNotExistForAdmin(t *testing.T) {
 		"sin foto": uid(3),
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := repo.RequestDeletion(context.Background(), id, "Borrado", uid(99), requestedAt, eventFor("k"))
+			err := repo.RequestDeletion(context.Background(), id, "Borrado", uid(99), requestedAt, eventFor("k"), nil)
 			if !errors.Is(err, repository.ErrServerNotFound) {
 				t.Fatalf("err = %v, quería ErrServerNotFound", err)
 			}
@@ -141,7 +195,7 @@ func TestRequestDeletionCanBeRepeatedWithANewVersionEachTime(t *testing.T) {
 	seedServer(t, servers, 1, "Sala")
 
 	for i := 0; i < 2; i++ {
-		if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(90+i), requestedAt.Add(time.Duration(i)*time.Minute), eventFor("k")); err != nil {
+		if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(90+i), requestedAt.Add(time.Duration(i)*time.Minute), eventFor("k"), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -159,7 +213,7 @@ func TestRequestDeletionRollsBackWhenTheEventCannotBeWritten(t *testing.T) {
 	seedServer(t, servers, 1, "Sala")
 
 	unserializable := func(int64) (string, any) { return "k", make(chan int) }
-	if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, unserializable); err == nil {
+	if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, unserializable, nil); err == nil {
 		t.Fatal("tenía que fallar si el evento no se puede escribir")
 	}
 
@@ -184,7 +238,7 @@ func TestConcurrentDeletionRequestsGetDistinctVersions(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("k"))
+			errs <- repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("k"), nil)
 		}()
 	}
 	wg.Wait()
@@ -213,7 +267,7 @@ func TestConcurrentDeletionRequestsGetDistinctVersions(t *testing.T) {
 func TestDeletionConfirmedByServersHidesTheServerAndKeepsTheRequest(t *testing.T) {
 	repo, servers, db := newModerationRepo(t)
 	seedServer(t, servers, 1, "Sala")
-	if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("k")); err != nil {
+	if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("k"), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -229,7 +283,7 @@ func TestDeletionConfirmedByServersHidesTheServerAndKeepsTheRequest(t *testing.T
 	if !st.deletedAt.Valid || !st.requestedAt.Valid || st.requestedBy.String != uid(99) {
 		t.Errorf("tiene que quedar el borrado y también el pedido: %+v", st)
 	}
-	if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("k")); !errors.Is(err, repository.ErrServerNotFound) {
+	if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("k"), nil); !errors.Is(err, repository.ErrServerNotFound) {
 		t.Errorf("un servidor ya borrado no se puede volver a eliminar: %v", err)
 	}
 }
@@ -239,7 +293,7 @@ func TestDeletionConfirmedByServersHidesTheServerAndKeepsTheRequest(t *testing.T
 func TestServerUpdatedDoesNotTouchTheModerationState(t *testing.T) {
 	repo, servers, db := newModerationRepo(t)
 	seedServer(t, servers, 1, "Sala")
-	if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("k")); err != nil {
+	if err := repo.RequestDeletion(context.Background(), uid(1), "Sala", uid(99), requestedAt, eventFor("k"), nil); err != nil {
 		t.Fatal(err)
 	}
 
