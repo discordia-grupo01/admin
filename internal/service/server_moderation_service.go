@@ -57,7 +57,8 @@ func (s *ServerModerationService) timestamp() time.Time {
 // staff staffID y deja escrito en el outbox el evento
 // admin.server_deletion_requested, firmado. No borra nada: servers ejecuta el
 // borrado y avisa con servers.server_deleted, que es lo que saca al servidor del
-// listado.
+// listado. En la misma transacción va admin.server_deletion_notice, firmado,
+// para que notifications le avise al dueño.
 func (s *ServerModerationService) Delete(ctx context.Context, serverID, confirmName, staffID string) error {
 	serverID, err := parseServerID(serverID)
 	if err != nil {
@@ -73,6 +74,15 @@ func (s *ServerModerationService) Delete(ctx context.Context, serverID, confirmN
 		}
 		e.Sign(s.hmacSecret)
 		return admin.RoutingKeyServerDeletionRequested, e
+	}, func(ownerID, serverName string) (string, any) {
+		e := admin.ServerDeletionNotice{
+			Meta:       envelope.Meta{EventID: s.newEventID(), OccurredAt: at},
+			ServerID:   serverID,
+			OwnerID:    ownerID,
+			ServerName: serverName,
+		}
+		e.Sign(s.hmacSecret)
+		return admin.RoutingKeyServerDeletionNotice, e
 	})
 	if err != nil {
 		return fmt.Errorf("pedir la eliminación del servidor: %w", err)
