@@ -48,7 +48,11 @@ type ServerModerationRepository interface {
 	// la réplica. Devuelve ErrServerNotFound si el servidor no existe para admin y
 	// ErrDeleteConfirmationMismatch si el nombre no coincide; en esos casos no
 	// cambia nada ni se escribe ningún evento.
-	RequestDeletion(ctx context.Context, serverID, confirmName, staffID string, at time.Time, event EventBuilder) error
+	//
+	// notice arma el aviso al dueño con el dueño y el nombre de la réplica, y va
+	// al outbox en la misma transacción. Con notice nil, o si la réplica no conoce
+	// al dueño, no se escribe aviso y el borrado sigue igual.
+	RequestDeletion(ctx context.Context, serverID, confirmName, staffID string, at time.Time, event EventBuilder, notice OwnerNoticeBuilder) error
 
 	// Suspend suspende el servidor y escribe el evento en el outbox, todo en una
 	// misma transacción. Bloquea la fila, así que dos suspensiones simultáneas no
@@ -77,7 +81,7 @@ func NewServerModerationRepository(db *sql.DB) ServerModerationRepository {
 	return &postgresServerModerationRepository{db: db}
 }
 
-func (r *postgresServerModerationRepository) RequestDeletion(ctx context.Context, serverID, confirmName, staffID string, at time.Time, event EventBuilder) error {
+func (r *postgresServerModerationRepository) RequestDeletion(ctx context.Context, serverID, confirmName, staffID string, at time.Time, event EventBuilder, notice OwnerNoticeBuilder) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("pedir la eliminación de %s: %w", serverID, err)
@@ -111,6 +115,12 @@ func (r *postgresServerModerationRepository) RequestDeletion(ctx context.Context
 	key, payload := event(version)
 	if err := outbox.Insert(ctx, tx, key, payload); err != nil {
 		return err
+	}
+	if notice != nil && lock.ownerID != "" {
+		key, payload := notice(lock.ownerID, lock.name)
+		if err := outbox.Insert(ctx, tx, key, payload); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("pedir la eliminación de %s: %w", serverID, err)
@@ -233,6 +243,7 @@ func (r *postgresServerModerationRepository) ListSuspended(ctx context.Context) 
 // serverLock es lo que se lee al bloquear un servidor para moderarlo.
 type serverLock struct {
 	name      string
+	ownerID   string
 	version   int64
 	suspended bool
 }
@@ -242,12 +253,12 @@ type serverLock struct {
 // servidores con foto recibida y sin borrar, que son los que el backoffice puede
 // listar.
 func lockServer(ctx context.Context, tx *sql.Tx, serverID string) (serverLock, error) {
-	var name sql.NullString
+	var name, ownerID sql.NullString
 	var lock serverLock
 	err := tx.QueryRowContext(ctx, `
-		SELECT name, moderation_version, suspended_at IS NOT NULL FROM servers
+		SELECT name, owner_id, moderation_version, suspended_at IS NOT NULL FROM servers
 		 WHERE server_id = $1 AND created_at IS NOT NULL AND deleted_at IS NULL
-		   FOR UPDATE`, serverID).Scan(&name, &lock.version, &lock.suspended)
+		   FOR UPDATE`, serverID).Scan(&name, &ownerID, &lock.version, &lock.suspended)
 	if errors.Is(err, sql.ErrNoRows) {
 		return serverLock{}, ErrServerNotFound
 	}
@@ -255,5 +266,6 @@ func lockServer(ctx context.Context, tx *sql.Tx, serverID string) (serverLock, e
 		return serverLock{}, fmt.Errorf("leer el servidor %s: %w", serverID, err)
 	}
 	lock.name = name.String
+	lock.ownerID = ownerID.String
 	return lock, nil
 }
