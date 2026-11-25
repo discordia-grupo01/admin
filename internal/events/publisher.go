@@ -5,6 +5,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -54,13 +55,13 @@ func (p *AMQPPublisher) Publish(ctx context.Context, routingKey string, payload 
 	if err != nil {
 		return fmt.Errorf("RabbitMQ inaccesible: %w", err)
 	}
-	if err := ch.PublishWithContext(ctx, broker.ExchangeName, routingKey, false, false, msg); err != nil {
+	if err := publishConfirmed(ctx, ch, broker.ExchangeName, routingKey, msg); err != nil {
 		p.reset()
 		ch, err := p.channel()
 		if err != nil {
 			return fmt.Errorf("reconectar tras un publish fallido: %w", err)
 		}
-		if err := ch.PublishWithContext(ctx, broker.ExchangeName, routingKey, false, false, msg); err != nil {
+		if err := publishConfirmed(ctx, ch, broker.ExchangeName, routingKey, msg); err != nil {
 			return fmt.Errorf("el publish volvió a fallar tras reconectar: %w", err)
 		}
 	}
@@ -104,6 +105,11 @@ func (p *AMQPPublisher) channel() (*amqp.Channel, error) {
 		_ = conn.Close()
 		return nil, err
 	}
+	if err := ch.Confirm(false); err != nil {
+		_ = ch.Close()
+		_ = conn.Close()
+		return nil, err
+	}
 	p.conn, p.ch = conn, ch
 	return ch, nil
 }
@@ -122,4 +128,37 @@ func (p *AMQPPublisher) closeLocked() {
 		_ = p.conn.Close()
 	}
 	p.conn, p.ch = nil, nil
+}
+
+// confirmTimeout acota cuánto se espera la confirmación del broker.
+var confirmTimeout = 5 * time.Second
+
+// publishConfirmed publica y espera el ack del broker: sin él, un nil solo
+// significa que el mensaje salió por el socket, no que RabbitMQ lo guardó, y
+// el outbox marcaría como publicado un evento que se pudo perder.
+func publishConfirmed(ctx context.Context, ch *amqp.Channel, exchange, routingKey string, msg amqp.Publishing) error {
+	confirm, err := ch.PublishWithDeferredConfirmWithContext(ctx, exchange, routingKey, false, false, msg)
+	if err != nil {
+		return err
+	}
+	return waitConfirm(ctx, confirm)
+}
+
+// deferredConfirm es lo que usamos de *DeferredConfirmation; existe para poder
+// probar la espera sin un RabbitMQ real.
+type deferredConfirm interface {
+	WaitContext(ctx context.Context) (bool, error)
+}
+
+func waitConfirm(ctx context.Context, confirm deferredConfirm) error {
+	ctx, cancel := context.WithTimeout(ctx, confirmTimeout)
+	defer cancel()
+	acked, err := confirm.WaitContext(ctx)
+	if err != nil {
+		return fmt.Errorf("esperando la confirmación del broker: %w", err)
+	}
+	if !acked {
+		return errors.New("el broker rechazó el mensaje")
+	}
+	return nil
 }

@@ -139,6 +139,11 @@ func (c *Consumer) consumeOnce(ctx context.Context) error {
 	}
 	defer retrier.Close()
 
+	// Sin prefetch RabbitMQ le manda toda la cola a la primera instancia y las
+	// otras quedan sin trabajo; con 10 el reparto entre instancias es parejo.
+	if err := ch.Qos(10, 0, false); err != nil {
+		return err
+	}
 	messages, err := ch.Consume(queue.Name, "", false, false, false, false, nil)
 	if err != nil {
 		return err
