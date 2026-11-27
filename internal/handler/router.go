@@ -41,6 +41,8 @@ func NewRouter(deps Deps, registrars ...RouteRegistrar) *gin.Engine {
 	}
 
 	r.HandleMethodNotAllowed = true
+	r.RedirectTrailingSlash = false
+	r.RedirectFixedPath = false
 	r.NoMethod(apierr.MethodNotAllowed)
 	r.NoRoute(apierr.NotFound)
 	return r

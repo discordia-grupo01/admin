@@ -225,3 +225,14 @@ func assertEnvelope(t *testing.T, body []byte) string {
 	}
 	return e.Code
 }
+
+func TestRouterNeverRedirects(t *testing.T) {
+	router := newTestRouter(&HealthHandler{})
+	for _, path := range []string{"/livez/", "/v1/admin/me/", "/v1/admin/%2F"} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code >= 300 && recorder.Code < 400 {
+			t.Errorf("GET %s answered %d with Location %q, want no redirect", path, recorder.Code, recorder.Header().Get("Location"))
+		}
+	}
+}
